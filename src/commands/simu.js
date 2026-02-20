@@ -7,7 +7,7 @@ module.exports = {
         .addStringOption(opt => opt.setName('modo').setDescription('1v1 ou 2v2').setRequired(true).addChoices({name:'1v1',value:'1v1'},{name:'2v2',value:'2v2'}))
         .addStringOption(opt => opt.setName('versao').setDescription('Ex: guys, beast ou priv').setRequired(true))
         .addIntegerOption(opt => opt.setName('vagas').setDescription('Quantidade de vagas').setRequired(true).addChoices(
-            {name:'2 (TESTE)', value:2}, // Adicionado para seu teste
+            {name:'2 (TESTE)', value:2},
             {name:'4', value:4},
             {name:'8', value:8},
             {name:'16', value:16}
@@ -19,8 +19,8 @@ module.exports = {
         const ID_CARGO_ORGANIZADOR = '1453126709447754010';
         const ID_CARGO_ADVERTENCIA = '1467222875399393421';
 
-        if (interaction.member.roles.cache.has(ID_CARGO_ADVERTENCIA)) return interaction.reply({ content: '❌ Você possui uma **Advertência** e não pode criar simuladores!', ephemeral: true });
-        if (!interaction.member.roles.cache.has(ID_CARGO_ORGANIZADOR) && interaction.user.id !== interaction.guild.ownerId) return interaction.reply({ content: '❌ Apenas Staff pode usar este comando!', ephemeral: true });
+        if (interaction.member.roles.cache.has(ID_CARGO_ADVERTENCIA)) return interaction.reply({ content: '❌ Você possui uma **Advertência**!', ephemeral: true });
+        if (!interaction.member.roles.cache.has(ID_CARGO_ORGANIZADOR) && interaction.user.id !== interaction.guild.ownerId) return interaction.reply({ content: '❌ Apenas Staff!', ephemeral: true });
 
         const modo = interaction.options.getString('modo');
         const versao = interaction.options.getString('versao');
@@ -43,10 +43,7 @@ module.exports = {
 
             if (!expirado) {
                 embed.addFields({ name: 'INSCRITOS:', value: inscritos.length > 0 ? inscritos.map(id => `<@${id}>`).join(', ') : 'Ninguém ainda', inline: false });
-                // Adicionado o "alpha" ao lado do progresso como você pediu
                 embed.setFooter({ text: `Progresso: (${inscritos.length}/${vagas}) alpha • Organizado por ${interaction.user.username}` });
-            } else {
-                embed.addFields({ name: 'STATUS:', value: '❌ O tempo acabou e o simulador foi cancelado.', inline: false });
             }
             return embed;
         };
@@ -63,8 +60,7 @@ module.exports = {
         });
 
         collector.on('collect', async i => {
-            if (expirado) return i.reply({ content: '❌ Ação inválida: Este simulador já expirou!', ephemeral: true });
-            if (inscritos.includes(i.user.id)) return i.reply({ content: 'Você já está inscrito!', ephemeral: true });
+            if (inscritos.includes(i.user.id)) return i.reply({ content: 'Já inscrito!', ephemeral: true });
             
             inscritos.push(i.user.id);
             
@@ -78,18 +74,28 @@ module.exports = {
         collector.on('end', async (collected, reason) => {
             if (reason === 'time') {
                 expirado = true;
-                const embedExpirada = gerarEmbed('#ff0000', 'EXPIRADO');
-                
-                await interaction.editReply({ embeds: [embedExpirada], components: [] });
-
-                // Auto-delete após 30 segundos se expirar
-                setTimeout(() => {
-                    interaction.deleteReply().catch(() => {});
-                }, 30000);
-
+                await interaction.editReply({ embeds: [gerarEmbed('#ff0000', 'EXPIRADO').addFields({ name: 'STATUS:', value: '❌ Cancelado.', inline: false })], components: [] });
+                setTimeout(() => interaction.deleteReply().catch(() => {}), 30000);
             } else if (reason === 'lotado') {
-                const embedLotada = gerarEmbed('#00ff00', 'LOTADO');
-                await interaction.editReply({ embeds: [embedLotada], components: [] });
+                // 🎲 Lógica de Chaveamento (Embaralhar)
+                const shuffle = (array) => array.sort(() => Math.random() - 0.5);
+                const jogadores = shuffle([...inscritos]).map(id => interaction.guild.members.cache.get(id)?.displayName || `User_${id.slice(0,4)}`);
+
+                let bracketText = "```\n";
+                if (vagas === 2) {
+                    bracketText += `${jogadores[0]} ─┐\n         ├─ 🏆 AGUARDANDO\n${jogadores[1]} ─┘\n`;
+                } else if (vagas === 4) {
+                    bracketText += `${jogadores[0]} ─┐\n         ├─ Venc A ─┐\n${jogadores[1]} ─┘         │\n                  ├─ 🏆 CAMPEÃO\n${jogadores[2]} ─┐         │\n         ├─ Venc B ─┘\n${jogadores[3]} ─┘\n`;
+                }
+                bracketText += "```";
+
+                const embedChave = new EmbedBuilder()
+                    .setTitle(`⚔️ CHAVEAMENTO - SIMU ${modo}`)
+                    .setColor('#00ff00')
+                    .setDescription(`**PARTIDAS GERADAS:**\n${bracketText}`)
+                    .setFooter({ text: "Boa sorte aos competidores!" });
+
+                await interaction.editReply({ embeds: [embedChave], components: [] });
             }
         });
     }
