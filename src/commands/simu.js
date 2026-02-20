@@ -24,34 +24,50 @@ module.exports = {
                 .setRequired(true)),
 
     async execute(interaction) {
-        const ID_CARGO_STAFF = '1453128709447754010';
+        // IDs fornecidos por você
+        const ID_CARGO_ORGANIZADOR = '1453126709447754010';
+        const ID_CARGO_ADVERTENCIA = '1467222875399393421';
 
-        // 🛡️ Trava de Segurança: Apenas Staff ou Dono
-        if (!interaction.member.roles.cache.has(ID_CARGO_STAFF) && interaction.user.id !== interaction.guild.ownerId) {
+        const temCargoStaff = interaction.member.roles.cache.has(ID_CARGO_ORGANIZADOR);
+        const temAdvertencia = interaction.member.roles.cache.has(ID_CARGO_ADVERTENCIA);
+        const isOwner = interaction.user.id === interaction.guild.ownerId;
+
+        // 1. BLOQUEIO DE ADVERTÊNCIA (Prioridade Máxima)
+        if (temAdvertencia) {
             return interaction.reply({ 
-                content: '❌ Você não tem o cargo **Organizar copa** para iniciar simuladores!', 
+                content: '❌ Você possui uma **Advertência Nível 1** e está impedido de organizar simuladores!', 
                 ephemeral: true 
             });
         }
 
+        // 2. PERMISSÃO APENAS PARA STAFF OU DONO
+        if (!temCargoStaff && !isOwner) {
+            return interaction.reply({ 
+                content: '❌ Apenas quem tem o cargo **Organizar copa** pode usar este comando!', 
+                ephemeral: true 
+            });
+        }
+
+        // PEGAR OPÇÕES DO COMANDO
         const modo = interaction.options.getString('modo');
         const vagas = interaction.options.getInteger('vagas');
         const versao = interaction.options.getString('versao');
         const mapa = interaction.options.getString('mapa');
 
+        // CRIAR A EMBED (Visual Roxo da Copa SZ)
         const embedSimu = new EmbedBuilder()
             .setTitle(`🏆 SIMULADOR ${modo}`)
-            .setColor('#8b00ff') // Roxo da sua imagem
+            .setColor('#8b00ff')
             .addFields(
                 { name: 'MAPA:', value: mapa.toUpperCase(), inline: true },
                 { name: 'VERSÃO:', value: versao.toUpperCase(), inline: true },
                 { name: 'VAGAS:', value: `${vagas} Jogadores`, inline: true },
                 { name: 'STATUS:', value: '🟢 Inscrições Abertas', inline: false }
             )
-            .setFooter({ text: `Progresso: (0/${vagas})` })
+            .setFooter({ text: `Progresso: (0/${vagas}) • Organizado por ${interaction.user.username}` })
             .setTimestamp();
 
-        // Aqui você pode adicionar botões de inscrição no futuro
+        // RESPOSTA FINAL
         await interaction.reply({ embeds: [embedSimu] });
     }
 };
