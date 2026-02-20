@@ -3,10 +3,15 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu')
-        .setDescription('Inicia um simulador de Stumble Guys')
+        .setDescription('Inicia um simulador de Stumble Guys (Versão Teste)')
         .addStringOption(opt => opt.setName('modo').setDescription('1v1 ou 2v2').setRequired(true).addChoices({name:'1v1',value:'1v1'},{name:'2v2',value:'2v2'}))
         .addStringOption(opt => opt.setName('versao').setDescription('Ex: guys, beast ou priv').setRequired(true))
-        .addIntegerOption(opt => opt.setName('vagas').setDescription('Quantidade de vagas').setRequired(true).addChoices({name:'4',value:4},{name:'8',value:8},{name:'16',value:16}))
+        .addIntegerOption(opt => opt.setName('vagas').setDescription('Quantidade de vagas').setRequired(true).addChoices(
+            {name:'2 (TESTE)', value:2}, // Adicionado para seu teste
+            {name:'4', value:4},
+            {name:'8', value:8},
+            {name:'16', value:16}
+        ))
         .addStringOption(opt => opt.setName('mapa').setDescription('Mapa da partida').setRequired(true))
         .addIntegerOption(opt => opt.setName('expira').setDescription('Minutos para expirar').setRequired(true)),
 
@@ -38,7 +43,8 @@ module.exports = {
 
             if (!expirado) {
                 embed.addFields({ name: 'INSCRITOS:', value: inscritos.length > 0 ? inscritos.map(id => `<@${id}>`).join(', ') : 'Ninguém ainda', inline: false });
-                embed.setFooter({ text: `Progresso: (${inscritos.length}/${vagas})` });
+                // Adicionado o "alpha" ao lado do progresso como você pediu
+                embed.setFooter({ text: `Progresso: (${inscritos.length}/${vagas}) alpha • Organizado por ${interaction.user.username}` });
             } else {
                 embed.addFields({ name: 'STATUS:', value: '❌ O tempo acabou e o simulador foi cancelado.', inline: false });
             }
@@ -76,9 +82,9 @@ module.exports = {
                 
                 await interaction.editReply({ embeds: [embedExpirada], components: [] });
 
-                // ⏱️ Auto-delete após 30 segundos se expirar
+                // Auto-delete após 30 segundos se expirar
                 setTimeout(() => {
-                    interaction.deleteReply().catch(() => console.log('Mensagem já deletada ou sem permissão.'));
+                    interaction.deleteReply().catch(() => {});
                 }, 30000);
 
             } else if (reason === 'lotado') {
