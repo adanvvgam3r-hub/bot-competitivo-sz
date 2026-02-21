@@ -1,73 +1,36 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
-const path = require('path');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('perfil')
-        .setDescription('Veja o perfil competitivo de um jogador')
-        .addUserOption(opt => opt.setName('quem').setDescription('Selecione o jogador (Opcional)')),
+        .setDescription('Perfil Alpha')
+        .addUserOption(o => o.setName('quem').setDescription('Jogador')),
 
     async execute(interaction) {
         const target = interaction.options.getUser('quem') || interaction.user;
-        const rankingPath = path.join(__dirname, '../../ranking.json');
+        const PATH = '/app/data/ranking.json';
+        let d = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
 
-        // Pega o avatar em alta resolução
-        const avatarUrl = target.displayAvatarURL({ dynamic: true, size: 1024 });
-
-        // Valores padrão (caso o jogador não tenha dados)
-        let dados = { 
-            simuV: 0, simuP: 0, 
-            apV: 0, apP: 0, 
-            x1V: 0, x1P: 0 
-        };
-
-        // Tenta ler o arquivo de ranking
-        if (fs.existsSync(rankingPath)) {
-            try {
-                const allData = JSON.parse(fs.readFileSync(rankingPath, 'utf8'));
-                if (allData[target.id]) {
-                    // Mescla os dados do arquivo com os valores padrão
-                    dados = { ...dados, ...allData[target.id] };
-                }
-            } catch (e) {
-                console.error("Erro ao ler ranking.json:", e);
-            }
+        if (fs.existsSync(PATH)) {
+            const all = JSON.parse(fs.readFileSync(PATH, 'utf8'));
+            if (all[target.id]) d = { ...d, ...all[target.id] };
         }
 
+        const hasData = Object.values(d).some(v => v > 0);
         const embed = new EmbedBuilder()
-            .setTitle(`PERFIL COMPETITIVO - ALPHA`)
-            .setThumbnail(avatarUrl)
-            .setColor('#8b00ff') // Roxo padrão da Copa SZ
-            .setAuthor({ name: target.username, iconURL: avatarUrl })
-            .setDescription(`Exibindo estatísticas de: ${target}`)
-            .setTimestamp();
+            .setTitle(`PERFIL ALPHA - ${target.username}`)
+            .setThumbnail(target.displayAvatarURL())
+            .setColor('#8b00ff');
 
-        // Verifica se o jogador tem alguma atividade
-        const temDados = Object.values(dados).some(v => v > 0);
-
-        if (!temDados) {
-            embed.addFields({ name: '\u200B', value: '❌ **Este jogador ainda não possui dados registrados.**' });
-        } else {
+        if (!hasData) embed.setDescription('❌ Sem dados registrados.');
+        else {
             embed.addFields(
-                { 
-                    name: '🏆 SIMULADORES', 
-                    value: `Venceu: \`${dados.simuV}\` | Vice: \`${dados.simuP}\``, 
-                    inline: false 
-                },
-                { 
-                    name: '💰 APOSTADOS (AP)', 
-                    value: `Venceu: \`${dados.apV}\` | Perdeu: \`${dados.apP}\``, 
-                    inline: false 
-                },
-                { 
-                    name: '⚔️ X1 CASUAL', 
-                    value: `Venceu: \`${dados.x1V}\` | Perdeu: \`${dados.x1P}\``, 
-                    inline: false 
-                }
+                { name: '🏆 SIMUS', value: `V: ${d.simuV} | Vice: ${d.simuP}`, inline: true },
+                { name: '💰 AP', value: `V: ${d.apV} | P: ${d.apP}`, inline: true },
+                { name: '⚔️ X1', value: `V: ${d.x1V} | P: ${d.x1P}`, inline: true }
             );
         }
-
         await interaction.reply({ embeds: [embed] });
     }
 };
