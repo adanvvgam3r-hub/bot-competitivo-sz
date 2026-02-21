@@ -75,7 +75,21 @@ module.exports = {
             }
         });
 
-        col.on('end', async (collected, reason) => {
+             col.on('end', async (collected, reason) => {
+            if (reason !== 'lotado') {
+                return interaction.editReply({ content: '❌ Inscrições expiradas.', embeds: [], components: [] });
+            }
+
+            // Atualiza a Embed para remover o tempo e mostrar que iniciou
+            const embedFinal = gerarEmbed()
+                .setDescription('✅ **INSCRIÇÕES ENCERRADAS - SIMULADOR EM ANDAMENTO**')
+                .setColor('#00ff00'); // Muda para verde indicando sucesso
+
+            await interaction.editReply({ embeds: [embedFinal], components: [] });
+
+            const players = [...inscritos].sort(() => Math.random() - 0.5);
+            // ... resto do código de criação dos tópicos ...
+
             if (reason !== 'lotado') return interaction.editReply({ content: '❌ Tempo expirado.', embeds: [], components: [] });
 
             await interaction.editReply({ content: '⚔️ **Vagas lotadas! Criando duplas por slots...**', components: [] });
