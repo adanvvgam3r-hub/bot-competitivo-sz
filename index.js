@@ -3,19 +3,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 require('dotenv').config();
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers] });
 client.commands = new Collection();
 
-// 📂 CONFIGURAÇÃO DO VOLUME (RAILWAY)
-const dataDir = '/app/data';
-const files = ['ranking.json', 'partidas.json', 'ranking_config.json'];
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-files.forEach(f => {
-    const p = path.join(dataDir, f);
-    if (!fs.existsSync(p)) fs.writeFileSync(p, JSON.stringify({}));
+// 📂 INICIALIZAÇÃO DO VOLUME (RAILWAY /APP/DATA)
+const DATA_DIR = '/app/data';
+const dbFiles = ['ranking.json', 'partidas.json', 'ranking_config.json'];
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+dbFiles.forEach(f => {
+    const p = path.join(DATA_DIR, f);
+    if (!fs.existsSync(p) || fs.readFileSync(p, 'utf8').length < 2) {
+        fs.writeFileSync(p, JSON.stringify({}, null, 2));
+    }
 });
 
-// Handler de Comandos Automático
 const commandsPath = path.join(__dirname, 'src/commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 const commandsJSON = [];
@@ -30,7 +32,7 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 (async () => {
     try {
         await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commandsJSON });
-        console.log('✅ Comandos e Volume carregados!');
+        console.log('✅ Sistema Alpha Online e Volume Montado!');
     } catch (e) { console.error(e); }
 })();
 
