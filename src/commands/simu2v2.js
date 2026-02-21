@@ -6,35 +6,37 @@ const {
     ButtonStyle, 
     ComponentType, 
     ChannelType,
-    StringSelectMenuBuilder,
-    PermissionFlagsBits
+    PermissionFlagsBits,
+    AttachmentBuilder
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 /**
- * 🏆 ALPHA 2V2 TOURNAMENT ENGINE v5.0
- * SISTEMA AVANÇADO DE GRADE, SELEÇÃO E CHAVEAMENTO POR RODADAS
- * PERSISTÊNCIA EM VOLUME RAILWAY: /app/data/
+ * 🏆 SZ COMPETITIVE ENGINE v6.0 - ULTIMATE EDITION
+ * SISTEMA DE GESTÃO DE TORNEIOS DE ALTA DISPONIBILIDADE
+ * FOCO: SEGURANÇA, PERSISTÊNCIA E PERFORMANCE NO RAILWAY
  */
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('simu2v2')
-        .setDescription('👑 [ALPHA] Simulador 2v2 Profissional com Grade de Seleção e Rodadas')
-        .addStringOption(o => o.setName('versao').setDescription('Versão (Ex: Guys, Beast, Priv)').setRequired(true))
-        .addIntegerOption(o => o.setName('vagas').setDescription('Total de jogadores').setRequired(true).addChoices(
-            { name: '4 Jogadores (2 Duplas - Final Direta)', value: 4 },
-            { name: '8 Jogadores (4 Duplas - Semis & Final)', value: 8 },
-            { name: '12 Jogadores (6 Duplas - Rodadas)', value: 12 }
+        .setName('simu1v1')
+        .setDescription('👑 [SZ] O Motor de Simuladores mais avançado do servidor.')
+        .addStringOption(o => o.setName('versao').setDescription('Versão técnica do simulador').setRequired(true))
+        .addIntegerOption(o => o.setName('vagas').setDescription('Vagas disponíveis').setRequired(true).addChoices(
+            { name: '2 Jogadores (Duelo Único)', value: 2 },
+            { name: '4 Jogadores (Chaveamento Curto)', value: 4 },
+            { name: '8 Jogadores (Torneio Completo)', value: 8 }
         ))
-        .addStringOption(o => o.setName('mapa').setDescription('Mapa da Competição').setRequired(true))
-        .addIntegerOption(o => o.setName('expira').setDescription('Minutos para inscrições').setRequired(true)),
+        .addStringOption(o => o.setName('mapa').setDescription('Mapa mandatório').setRequired(true))
+        .addIntegerOption(o => o.setName('expira').setDescription('Tempo limite (minutos)').setRequired(true)),
 
     async execute(interaction) {
-        // --- CONSTANTES DE ACESSO ---
-        const ID_STAFF = '1453126709447754010';
-        const ID_ADV = '1467222875399393421';
+        // =========================================================
+        // 🛡️ SEÇÃO 1: DEFINIÇÕES DE AMBIENTE E SEGURANÇA
+        // =========================================================
+        const ID_CARGO_STAFF = '1453126709447754010';
+        const ID_CARGO_ADV = '1467222875399393421';
         const ID_CANAL_TOPICOS = '1474560305492394106';
         const ID_CANAL_AUDITORIA = '1473873994674606231';
         
@@ -42,280 +44,333 @@ module.exports = {
         const PATH_CONFIG = '/app/data/ranking_config.json';
         const ORGANIZADOR_ID = interaction.user.id;
 
-        // --- VALIDAÇÕES ALPHA ---
-        if (interaction.member.roles.cache.has(ID_ADV)) {
-            return interaction.reply({ content: '⛔ **SISTEMA ALPHA:** Jogadores com advertência não podem gerenciar torneios.', ephemeral: true });
+        // Flags de Validação
+        const isStaffAutorizada = interaction.member.roles.cache.has(ID_CARGO_STAFF);
+        const isUsuarioComRestricao = interaction.member.roles.cache.has(ID_CARGO_ADV);
+        const isServerOwner = interaction.user.id === interaction.guild.ownerId;
+
+        // Resposta de Segurança Imediata
+        if (isUsuarioComRestricao) {
+            return interaction.reply({ content: '⛔ **SISTEMA SZ:** Operação abortada. Sua conta possui restrições disciplinares.', ephemeral: true });
         }
 
-        if (!interaction.member.roles.cache.has(ID_STAFF) && interaction.user.id !== interaction.guild.ownerId) {
-            return interaction.reply({ content: '❌ **ACESSO NEGADO:** Exclusivo para Staff autorizada.', ephemeral: true });
+        if (!isStaffAutorizada && !isServerOwner) {
+            return interaction.reply({ content: '❌ **ERRO DE PERMISSÃO:** Comando restrito à hierarquia Staff SZ.', ephemeral: true });
         }
 
-        const versaoInput = interaction.options.getString('versao').toUpperCase();
-        const vagasTotais = interaction.options.getInteger('vagas');
-        const mapaOficial = interaction.options.getString('mapa').toUpperCase();
-        const tempoLimite = interaction.options.getInteger('expira');
+        // =========================================================
+        // 📊 SEÇÃO 2: COLETA E SANITIZAÇÃO DE DADOS
+        // =========================================================
+        const cfgVersao = interaction.options.getString('versao').toUpperCase();
+        const cfgVagas = interaction.options.getInteger('vagas');
+        const cfgMapa = interaction.options.getString('mapa').toUpperCase();
+        const cfgTempo = interaction.options.getInteger('expira');
+        
+        let poolJogadores = [];
+        let engineStatus = "INICIALIZANDO";
 
-        // --- INICIALIZAÇÃO DA GRADE DE DUPLAS ---
-        let gradeDuplas = [];
-        for (let i = 0; i < vagasTotais / 2; i++) {
-            gradeDuplas.push({ 
-                id: i + 1, 
-                p1id: null, p1nome: null, 
-                p2id: null, p2nome: null, 
-                vencedora: false 
-            });
-        }
+        // =========================================================
+        // ⚙️ SEÇÃO 3: FUNÇÕES DE MOTOR INTERNO (CORE)
+        // =========================================================
+        
+        const coreLogger = async (mensagem, gravidade = 'INFO') => {
+            const canalLogs = interaction.guild.channels.cache.get(ID_CANAL_AUDITORIA);
+            if (!canalLogs) return console.log(`[SZ-LOG] ${mensagem}`);
+            
+            const logEmbed = new EmbedBuilder()
+                .setTitle(`🛠️ AUDITORIA SZ - ${gravidade}`)
+                .setDescription(`\`\`\`fix\n${mensagem}\n\`\`\``)
+                .setColor(gravidade === 'ALERTA' ? '#ff0000' : '#3498db')
+                .setTimestamp();
+            
+            await canalLogs.send({ embeds: [logEmbed] });
+        };
 
-        // --- SISTEMA DE LOGS ---
-        const registrarAuditoria = async (desc, cor = '#3498db') => {
-            const canal = interaction.guild.channels.cache.get(ID_CANAL_AUDITORIA);
-            if (canal) {
-                const log = new EmbedBuilder().setTitle('🛡️ LOG 2V2 ALPHA').setDescription(desc).setColor(cor).setTimestamp();
-                await canal.send({ embeds: [log] });
+        const coreFileRead = (caminho) => {
+            try {
+                if (!fs.existsSync(caminho)) return {};
+                const data = fs.readFileSync(caminho, 'utf8');
+                return JSON.parse(data || '{}');
+            } catch (err) {
+                coreLogger(`Erro crítico de leitura: ${err.message}`, 'ALERTA');
+                return {};
             }
         };
 
-        // --- GESTÃO DE ARQUIVOS (VOLUME) ---
-        const lerDados = (p) => {
-            try { return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {}; }
-            catch (e) { return {}; }
+        const coreFileWrite = (caminho, conteudo) => {
+            try {
+                fs.writeFileSync(caminho, JSON.stringify(conteudo, null, 4));
+                return true;
+            } catch (err) {
+                coreLogger(`Erro crítico de gravação: ${err.message}`, 'ALERTA');
+                return false;
+            }
         };
 
-        const gravarDados = (p, d) => {
-            try { fs.writeFileSync(p, JSON.stringify(d, null, 4)); return true; }
-            catch (e) { return false; }
-        };
+        // =========================================================
+        // 📋 SEÇÃO 4: LÓGICA DE INSCRIÇÃO E GESTÃO DE FILA
+        // =========================================================
+        
+        const lobbyEmbed = new EmbedBuilder()
+            .setTitle(`🏆 SIMULADOR SZ COMPETITIVO | ${cfgMapa}`)
+            .setAuthor({ name: `ORGANIZADOR: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
+            .setColor('#8b00ff')
+            .setDescription(`**Este evento está sendo gravado e monitorado.**\nInscrições abertas para jogadores verificados.`)
+            .addFields(
+                { name: '🔹 Mapa:', value: `\`${cfgMapa}\``, inline: true },
+                { name: '🔹 Versão:', value: `\`${cfgVersao}\``, inline: true },
+                { name: '🔹 Vagas:', value: `\`${cfgVagas}\``, inline: true }
+            )
+            .setFooter({ text: `SZ Engine • Sistema de Alta Disponibilidade • alpha` })
+            .setTimestamp();
 
-        // --- INTERFACE VISUAL DA GRADE ---
-        const construirGradeEmbed = (cor = '#0099ff', status = '🟢 SELEÇÃO DE TIMES') => {
-            const embed = new EmbedBuilder()
-                .setTitle(`🏆 SIMULADOR 2V2 | ${status}`)
-                .setColor(cor)
-                .setDescription(`📊 **MAPA:** \`${mapaOficial}\` | **VERSÃO:** \`${versaoInput}\``)
-                .setThumbnail(interaction.guild.iconURL());
-
-            gradeDuplas.forEach(d => {
-                const j1 = d.p1id ? `<@${d.p1id}>` : '` Vazio `';
-                const j2 = d.p2id ? `<@${d.p2id}>` : '` Vazio `';
-                embed.addFields({ 
-                    name: `👥 DUPLA ${d.id}`, 
-                    value: `Slot A: ${j1}\nSlot B: ${j2}`, 
-                    inline: true 
-                });
-            });
-
-            embed.setFooter({ text: `Organizador: ${interaction.user.username} • alpha engine` });
-            return embed;
-        };
-
-        // --- ESCADA DE SELEÇÃO (MENU) ---
-        const menuSelecao = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('menu_dupla')
-                .setPlaceholder('[ ESCOLHA SEU TIME > ]')
-                .addOptions(gradeDuplas.map(d => ({
-                    label: `Entrar na Dupla ${d.id}`,
-                    value: `dupla_${d.id - 1}`,
-                    description: `Vagas disponíveis para o Time ${d.id}`
-                })))
+        const lobbyRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('btn_sz_join')
+                .setLabel('CONFIRMAR ENTRADA')
+                .setEmoji('🥊')
+                .setStyle(ButtonStyle.Primary)
         );
 
-        const msgPrincipal = await interaction.reply({ 
-            embeds: [construirGradeEmbed()], 
-            components: [menuSelecao], 
+        const responseOriginal = await interaction.reply({ 
+            embeds: [lobbyEmbed], 
+            components: [lobbyRow], 
             fetchReply: true 
         });
 
-        const coletorSelecao = msgPrincipal.createMessageComponentCollector({ 
-            time: tempoLimite * 60000 
+        const collectorInscricoes = responseOriginal.createMessageComponentCollector({ 
+            componentType: ComponentType.Button, 
+            time: cfgTempo * 60000 
         });
 
-        // --- LÓGICA DE PREENCHIMENTO DA GRADE ---
-        coletorSelecao.on('collect', async i => {
-            const todosInscritos = gradeDuplas.flatMap(d => [d.p1id, d.p2id]);
+        collectorInscricoes.on('collect', async i => {
+            if (i.member.roles.cache.has(ID_CARGO_ADV)) {
+                return i.reply({ content: '❌ Bloqueio de Segurança: Você não tem permissão para competir.', ephemeral: true });
+            }
+
+            if (poolJogadores.includes(i.user.id)) {
+                return i.reply({ content: '⚠️ Você já está registrado neste evento.', ephemeral: true });
+            }
+
+            if (poolJogadores.length >= cfgVagas) {
+                return i.reply({ content: '❌ Vagas preenchidas.', ephemeral: true });
+            }
+
+            poolJogadores.push(i.user.id);
             
-            if (i.isStringSelectMenu()) {
-                if (todosInscritos.includes(i.user.id)) {
-                    return i.reply({ content: '⚠️ Você já ocupa um slot nesta grade.', ephemeral: true });
-                }
+            const updateEmbed = EmbedBuilder.from(lobbyEmbed)
+                .setFooter({ text: `Progresso: (${poolJogadores.length}/${cfgVagas}) • SZ Engine • alpha` });
 
-                const dIdx = parseInt(i.values[0].split('_')[1]);
-                const btnsSlots = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`slot_${dIdx}_p1id`)
-                        .setLabel(`Entrar Slot A (D${dIdx + 1})`)
-                        .setStyle(ButtonStyle.Primary)
-                        .setDisabled(!!gradeDuplas[dIdx].p1id),
-                    new ButtonBuilder()
-                        .setCustomId(`slot_${dIdx}_p2id`)
-                        .setLabel(`Entrar Slot B (D${dIdx + 1})`)
-                        .setStyle(ButtonStyle.Primary)
-                        .setDisabled(!!gradeDuplas[dIdx].p2id)
-                );
+            await i.update({ embeds: [updateEmbed] });
 
-                return i.reply({ 
-                    content: `Você selecionou a **Dupla ${dIdx + 1}**. Escolha seu slot:`, 
-                    components: [btnsSlots], 
-                    ephemeral: true 
-                });
-            }
-
-            if (i.isButton()) {
-                const [, dIdx, campo] = i.customId.split('_');
-                const index = parseInt(dIdx);
-
-                if (gradeDuplas[index][campo]) {
-                    return i.reply({ content: '❌ Slot preenchido por outro jogador.', ephemeral: true });
-                }
-
-                gradeDuplas[index][campo] = i.user.id;
-                gradeDuplas[index][campo.replace('id', 'nome')] = i.user.username.slice(0,8);
-
-                const total = gradeDuplas.flatMap(d => [d.p1id, d.p2id]).filter(v => v !== null).length;
-
-                await i.update({ content: `✅ Você entrou na **Dupla ${index + 1}**!`, components: [] });
-                
-                if (total === vagasTotais) {
-                    coletorSelecao.stop('lotado');
-                } else {
-                    await interaction.editReply({ embeds: [construirGradeEmbed()] });
-                }
+            if (poolJogadores.length === cfgVagas) {
+                collectorInscricoes.stop('lotado');
             }
         });
 
-        coletorSelecao.on('end', async (collected, reason) => {
+        collectorInscricoes.on('end', async (collected, reason) => {
+            if (reason === 'time') {
+                const cancelEmbed = new EmbedBuilder()
+                    .setTitle('❌ EVENTO EXPIRADO')
+                    .setColor('#ff0000')
+                    .setDescription('O tempo limite de inscrição foi atingido sem preenchimento das vagas.');
+                return interaction.editReply({ embeds: [cancelEmbed], components: [] });
+            }
+
             if (reason === 'lotado') {
-                // --- INICIALIZAÇÃO DA BRACKET DE RODADAS ---
-                let bracket2v2 = {
+                // =========================================================
+                // 🏗️ SEÇÃO 5: GERAÇÃO DA BRACKET E CHAVEAMENTO
+                // =========================================================
+                engineStatus = "PROCESSANDO_CHAVES";
+                await coreLogger(`Simulador ${cfgMapa} lotado. Iniciando motor de chaveamento.`);
+
+                const shuffle = (array) => array.sort(() => Math.random() - 0.5);
+                const idsFinalizados = shuffle([...poolJogadores]);
+                const nomesFinalizados = idsFinalizados.map(id => interaction.guild.members.cache.get(id)?.displayName.slice(0, 10) || "SZ_PLAYER");
+
+                let dataBracket = {
+                    quartas: [],
                     semis: [],
-                    final: { d1: null, d2: null, vNome: null }
+                    final: { p1: "", p2: "", p1id: "", p2id: "", vId: null, vNome: "" }
                 };
 
-                if (vagasTotais === 4) {
-                    bracket2v2.final = { d1: gradeDuplas[0], d2: gradeDuplas[1], vNome: null };
-                } else {
-                    // Mapeia Semis para 8 jogadores
-                    for(let i=0; i<gradeDuplas.length; i+=2) {
-                        bracket2v2.semis.push({ d1: gradeDuplas[i], d2: gradeDuplas[i+1], vNome: null });
+                // Inicialização da Estrutura de Dados das Rodadas
+                if (cfgVagas === 2) {
+                    dataBracket.final = { p1: nomesFinalizados, p2: nomesFinalizados, p1id: idsFinalizados, p2id: idsFinalizados, vId: null };
+                } else if (cfgVagas === 4) {
+                    for(let i=0; i<4; i+=2) {
+                        dataBracket.semis.push({ p1: nomesFinalizados[i], p2: nomesFinalizados[i+1], p1id: idsFinalizados[i], p2id: idsFinalizados[i+1], vId: null });
                     }
-                    bracket2v2.final = { d1: {nome: "Vencedor A"}, d2: {nome: "Vencedor B"}, vNome: null };
+                    dataBracket.final = { p1: "Finalista A", p2: "Finalista B", vId: null };
+                } else if (cfgVagas === 8) {
+                    for(let i=0; i<8; i+=2) {
+                        dataBracket.quartas.push({ p1: nomesFinalizados[i], p2: nomesFinalizados[i+1], p1id: idsFinalizados[i], p2id: idsFinalizados[i+1], vId: null });
+                    }
+                    dataBracket.semis = [{ p1: "Vencedor 1", p2: "Vencedor 2", vId: null }, { p1: "Vencedor 3", p2: "Vencedor 4", vId: null }];
+                    dataBracket.final = { p1: "Finalista A", p2: "Finalista B", vId: null };
                 }
 
-                const gerarMarkdownBracket = () => {
-                    let md = "```md\n# ⚔️ BRACKET 2V2 OFICIAL\n\n";
-                    const f = (m) => {
-                        const n1 = m.d1.nome || `${m.d1.p1nome}+${m.d1.p2nome}`;
-                        const n2 = m.d2.nome || `${m.d2.p1nome}+${m.d2.p2nome}`;
-                        if (!m.vNome) return `${n1.padEnd(15)} vs ${n2}`;
-                        return m.vNome === n1 ? `>${n1}<`.padEnd(17) + ` vs ${n2}` : `${n1.padEnd(15)} vs >${n2}<`;
+                const renderVisual = () => {
+                    let b = "```md\n# 🛡️ BRACKET SZ OFICIAL - 1V1\n\n";
+                    const formatarPartida = (m) => {
+                        if (!m.p1id || !m.vId) return `${m.p1.padEnd(12)} vs ${m.p2}`;
+                        return m.vId === m.p1id ? `>${m.p1}<`.padEnd(14) + ` vs ${m.p2}` : `${m.p1.padEnd(12)} vs >${m.p2}<`;
                     };
 
-                    if (vagasTotais === 8) {
-                        md += `[SEMIFINAIS]\n1. ${f(bracket2v2.semis[0])}\n2. ${f(bracket2v2.semis[1])}\n\n`;
+                    if (cfgVagas === 8) {
+                        b += `[QUARTAS DE FINAL]\n` + dataBracket.quartas.map((m, i) => `${i+1}. ${formatarPartida(m)}`).join('\n') + "\n\n";
                     }
-                    md += `[GRANDE FINAL]\n⭐ ${f(bracket2v2.final)}\n`;
-                    if (bracket2v2.final.vNome) md += `\n🏆 CAMPEÕES: ${bracket2v2.final.vNome.toUpperCase()}`;
-                    return md + "```";
+                    if (cfgVagas >= 4) {
+                        b += `[SEMIFINAIS]\n` + dataBracket.semis.map((m, i) => `${i === 0 ? 'A' : 'B'}. ${formatarPartida(m)}`).join('\n') + "\n\n";
+                    }
+                    b += `[GRANDE FINAL]\n⭐ ${formatarPartida(dataBracket.final)}\n`;
+                    if (dataBracket.final.vId) b += `\n🏆 CAMPEÃO SZ: ${dataBracket.final.vNome.toUpperCase()}`;
+                    return b + "```";
                 };
 
+                const embedBracket = new EmbedBuilder()
+                    .setTitle('⚔️ CHAVEAMENTO DEFINIDO | SZ ENGINE')
+                    .setColor('#00ff00')
+                    .setDescription(renderVisual())
+                    .setTimestamp();
+
                 await interaction.editReply({ 
-                    content: '🏁 **Grade Fechada!** Gerando confrontos...', 
-                    embeds: [new EmbedBuilder().setTitle('⚔️ CHAVEAMENTO ALPHA 2V2').setDescription(gerarMarkdownBracket()).setColor('#00ff00')], 
+                    content: '🚀 **Inscrições finalizadas.** Verifique seus tópicos privados.',
+                    embeds: [embedBracket], 
                     components: [] 
                 });
 
-                const canalThreads = interaction.guild.channels.cache.get(ID_CANAL_TOPICOS);
+                const canalAlvo = interaction.guild.channels.cache.get(ID_CANAL_TOPICOS);
 
-                // --- MOTOR DE CONFRONTOS 2V2 ---
-                const dispararDuelo2v2 = async (match, fase, idx) => {
-                    const thread = await canalThreads.threads.create({
-                        name: `2v2-${match.d1.id || 'A'}-vs-${match.d2.id || 'B'}`,
-                        type: ChannelType.PrivateThread
+                // =========================================================
+                // 🥊 SEÇÃO 6: MOTOR DE DUELO E GESTÃO DE VITÓRIAS
+                // =========================================================
+                
+                const executorDuelo = async (confronto, faseNome, index) => {
+                    if (!confronto.p1id || !confronto.p2id) return;
+
+                    const thread = await canalAlvo.threads.create({
+                        name: `SZ1v1-${confronto.p1}-vs-${confronto.p2}`,
+                        autoArchiveDuration: 60,
+                        type: ChannelType.PrivateThread,
+                        reason: 'Competição SZ 1v1'
                     });
 
-                    [match.d1.p1id, match.d1.p2id, match.d2.p1id, match.d2.p2id].forEach(id => {
-                        if (id) thread.members.add(id);
-                    });
+                    await thread.members.add(confronto.p1id);
+                    await thread.members.add(confronto.p2id);
 
-                    const n1 = match.d1.nome || `${match.d1.p1nome}+${match.d1.p2nome}`;
-                    const n2 = match.d2.nome || `${match.d2.p1nome}+${match.d2.p2nome}`;
-
-                    const rowV = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('v1').setLabel(`Vencer: ${n1}`).setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('v2').setLabel(`Vencer: ${n2}`).setStyle(ButtonStyle.Danger)
+                    const btsVitoria = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`win_${confronto.p1id}`).setLabel(`Vencer: ${confronto.p1}`).setStyle(ButtonStyle.Success),
+                        new ButtonBuilder().setCustomId(`win_${confronto.p2id}`).setLabel(`Vencer: ${confronto.p2}`).setStyle(ButtonStyle.Success)
                     );
 
-                    const msgT = await thread.send({
-                        content: `🏆 <@${ORGANIZADOR_ID}>, declare o resultado:\n**${n1}** vs **${n2}**`,
-                        components: [rowV]
+                    const msgDuelo = await thread.send({
+                        content: `🏁 **ESTÁGIO DE DUELO SZ**\nOrganizador: <@${ORGANIZADOR_ID}>\nPartida: <@${confronto.p1id}> vs <@${confronto.p2id}>\nMapa: ${cfgMapa}`,
+                        components: [btsVitoria]
                     });
 
-                    const sCol = msgT.createMessageComponentCollector();
-                    sCol.on('collect', async b => {
+                    const coletorVitoria = msgDuelo.createMessageComponentCollector();
+
+                    coletorVitoria.on('collect', async b => {
+                        // 🔒 TRAVA DE ORGANIZADOR: SÓ O CRIADOR PODE VALIDAR
                         if (b.user.id !== ORGANIZADOR_ID) {
-                            return b.reply({ content: `❌ Bloqueio Organizador: Apenas <@${ORGANIZADOR_ID}> pode validar o resultado.`, ephemeral: true });
+                            return b.reply({ 
+                                content: `❌ **BLOQUEIO SZ:** Apenas o organizador <@${ORGANIZADOR_ID}> tem autoridade sobre este resultado.`, 
+                                ephemeral: true 
+                            });
                         }
 
-                        const winDupla = b.customId === 'v1' ? match.d1 : match.d2;
-                        const loseDupla = b.customId === 'v1' ? match.d2 : match.d1;
-                        const winNome = b.customId === 'v1' ? n1 : n2;
+                        const winId = b.customId.replace('win_', '');
+                        const winNome = b.guild.members.cache.get(winId).displayName;
 
-                        if (fase === 'semis') {
-                            bracket2v2.semis[idx].vNome = winNome;
-                            // Avança para a final (simples)
-                            const finalPos = idx === 0 ? 'd1' : 'd2';
-                            bracket2v2.final[finalPos] = { nome: winNome, p1id: winDupla.p1id, p2id: winDupla.p2id, p1nome: winDupla.p1nome, p2nome: winDupla.p2nome };
-                        } else {
-                            bracket2v2.final.vNome = winNome;
-                            // --- ATUALIZAÇÃO RANKING DUPLO ---
-                            let rank = lerDados(PATH_RANKING);
-                            [winDupla.p1id, winDupla.p2id].forEach(id => {
-                                if (!rank[id]) rank[id] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
-                                rank[id].simuV += 1;
-                            });
-                            [loseDupla.p1id, loseDupla.p2id].forEach(id => {
-                                if (!rank[id]) rank[id] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
-                                rank[id].simuP += 1; // VICE
-                            });
-                            gravarDados(PATH_RANKING, rank);
+                        // 📈 LÓGICA DE PROGRESSÃO DE BRACKET
+                        if (faseNome === 'quartas') {
+                            dataBracket.quartas[index].vId = winId;
+                            const sIdx = Math.floor(index / 2);
+                            const slot = (index % 2 === 0) ? 'p1' : 'p2';
+                            dataBracket.semis[sIdx][slot] = winNome;
+                            dataBracket.semis[sIdx][slot + 'id'] = winId;
+                        } 
+                        else if (faseNome === 'semis') {
+                            dataBracket.semis[index].vId = winId;
+                            const slot = (index === 0) ? 'p1' : 'p2';
+                            dataBracket.final[slot] = winNome;
+                            dataBracket.final[slot + 'id'] = winId;
+                        } 
+                        else if (faseNome === 'final') {
+                            dataBracket.final.vId = winId;
+                            dataBracket.final.vNome = winNome;
 
-                            // --- ATUALIZAÇÃO GRADE FIXA ---
+                            // 💾 GRAVAÇÃO NO RANKING PERMANENTE
+                            let dbRanking = coreFileRead(PATH_RANKING);
+                            const loseId = (winId === confronto.p1id) ? confronto.p2id : confronto.p1id;
+
+                            if (!dbRanking[winId]) dbRanking[winId] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
+                            if (!dbRanking[loseId]) dbRanking[loseId] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
+
+                            dbRanking[winId].simuV += 1;
+                            dbRanking[loseId].simuP += 1; // Registro de Vice-Campeão
+                            coreFileWrite(PATH_RANKING, dbRanking);
+
+                            // 📢 ATUALIZAÇÃO DA GRADE VISUAL FIXA
                             try {
-                                const conf = lerDados(PATH_CONFIG);
-                                const canalR = await interaction.guild.channels.fetch(conf.channelId);
-                                const msgR = await canalR.messages.fetch(conf.messageId);
-                                const top10 = Object.entries(rank).sort((a,b) => b[1].simuV - a[1].simuV).slice(0,10);
-                                
-                                let tabela = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
-                                top10.forEach((u, i) => {
-                                    const nomeU = interaction.guild.members.cache.get(u[0])?.displayName.slice(0,12) || "Player";
-                                    tabela += `${(i+1).toString().padEnd(3)}  ${nomeU.padEnd(14)}  ${u[1].simuV.toString().padEnd(5)}  ${u[1].simuP}\n`;
-                                });
-                                await msgR.edit({ embeds: [new EmbedBuilder().setTitle('🏆 RANKING GERAL - ALPHA').setColor('#f1c40f').setDescription(tabela + "```")] });
-                            } catch (err) {}
+                                const configFixo = coreFileRead(PATH_CONFIG);
+                                if (configFixo.channelId) {
+                                    const canalRank = await interaction.guild.channels.fetch(configFixo.channelId);
+                                    const msgRank = await canalRank.messages.fetch(configFixo.messageId);
+
+                                    const top10 = Object.entries(dbRanking)
+                                        .map(([id, s]) => ({
+                                            nome: interaction.guild.members.cache.get(id)?.displayName.slice(0, 12) || "Player",
+                                            v: s.simuV || 0,
+                                            d: s.simuP || 0
+                                        }))
+                                        .sort((a, b) => b.v - a.v)
+                                        .slice(0, 10);
+
+                                    let gradeSZ = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
+                                    top10.forEach((u, idx) => {
+                                        const p = (idx + 1).toString().padEnd(3, ' ');
+                                        const n = u.nome.padEnd(14, ' ');
+                                        const v = u.v.toString().padEnd(5, ' ');
+                                        gradeSZ += `${p}  ${n}  ${v}  ${u.d}\n`;
+                                    });
+                                    gradeSZ += "```";
+
+                                    await msgRank.edit({ 
+                                        embeds: [new EmbedBuilder().setTitle('🏆 RANKING GERAL SZ').setColor('#f1c40f').setDescription(gradeSZ).setTimestamp()] 
+                                    });
+                                }
+                            } catch (e) {
+                                console.log("Grade fixa não localizada para edição automática.");
+                            }
                         }
 
+                        // Edição da Bracket em tempo real na mensagem principal
                         await interaction.editReply({ 
-                            embeds: [new EmbedBuilder().setTitle('⚔️ BRACKET 2V2 ATUALIZADA').setDescription(gerarMarkdownBracket()).setColor('#ffff00')] 
+                            embeds: [new EmbedBuilder().setTitle('⚔️ ATUALIZAÇÃO DE BRACKET | SZ').setDescription(renderVisual()).setColor('#ffff00')] 
                         });
 
-                        await b.update({ content: `✅ Resultado processado. Vitória da Dupla: **${winNome}**`, components: [], embeds: [] });
-                        await registrarAuditoria(`Vencedores 2v2: ${winNome} declarado por ${interaction.user.tag}`);
+                        await coreLogger(`Partida validada por ${interaction.user.tag}: ${winNome} avançou na fase ${faseNome}.`);
+
+                        await b.update({ content: `✅ **RESULTADO PROCESSADO.** Vitória de <@${winId}> confirmada.`, components: [] });
+                        
                         setTimeout(() => thread.delete().catch(() => {}), 15000);
                     });
                 };
 
-                // DISPARO INICIAL
-                if (vagasTotais === 4) {
-                    await dispararDuelo2v2(bracket2v2.final, 'final', 0);
-                } else {
-                    for(let i=0; i<bracket2v2.semis.length; i++) {
-                        await dispararDuelo2v2(bracket2v2.semis[i], 'semis', i);
+                // DISPARO DAS RODADAS INICIAIS
+                if (cfgVagas === 2) {
+                    await executorDuelo(dataBracket.final, 'final', 0);
+                } else if (cfgVagas === 4) {
+                    for(let i=0; i<dataBracket.semis.length; i++) {
+                        await executorDuelo(dataBracket.semis[i], 'semis', i);
+                    }
+                } else if (cfgVagas === 8) {
+                    for(let i=0; i<bracketState.quartas.length; i++) {
+                        await executorDuelo(dataBracket.quartas[i], 'quartas', i);
                     }
                 }
-            } else if (reason === 'time') {
-                await interaction.editReply({ content: '❌ Inscrições expiradas.', embeds: [], components: [] });
             }
         });
     }
