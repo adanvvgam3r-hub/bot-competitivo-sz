@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu')
-        .setDescription('Inicia um simulador com chaveamento automático')
+        .setDescription('Inicia um simulador com tópicos em canal específico')
         .addStringOption(opt => opt.setName('modo').setDescription('1v1 ou 2v2').setRequired(true).addChoices({name:'1v1',value:'1v1'},{name:'2v2',value:'2v2'}))
         .addStringOption(opt => opt.setName('versao').setDescription('Ex: guys, beast ou priv').setRequired(true))
         .addIntegerOption(opt => opt.setName('vagas').setDescription('Vagas').setRequired(true).addChoices({name:'2 (TESTE)', value:2},{name:'4',value:4},{name:'8',value:8}))
@@ -13,6 +13,7 @@ module.exports = {
     async execute(interaction) {
         const ID_CARGO_STAFF = '1453126709447754010';
         const ID_CARGO_ADV = '1467222875399393421';
+        const ID_CANAL_CONFRONTOS = '1474560305492394106'; // O canal que você especificou
 
         if (interaction.member.roles.cache.has(ID_CARGO_ADV)) return interaction.reply({ content: '❌ Você possui uma **Advertência**!', ephemeral: true });
         if (!interaction.member.roles.cache.has(ID_CARGO_STAFF) && interaction.user.id !== interaction.guild.ownerId) return interaction.reply({ content: '❌ Apenas Staff!', ephemeral: true });
@@ -37,7 +38,7 @@ module.exports = {
                 );
             if (!expirado) {
                 embed.addFields({ name: 'INSCRITOS:', value: inscritos.length > 0 ? inscritos.map(id => `<@${id}>`).join(', ') : 'Ninguém ainda', inline: false });
-                embed.setFooter({ text: `Progresso: (${inscritos.length}/${vagas}) alpha • Por ${interaction.user.username}` });
+                embed.setFooter({ text: `Progresso: (${inscritos.length}/${vagas}) alpha` });
             }
             return embed;
         };
@@ -56,58 +57,54 @@ module.exports = {
         collector.on('end', async (collected, reason) => {
             if (reason === 'time') {
                 expirado = true;
-                await interaction.editReply({ embeds: [gerarEmbed('#ff0000', 'EXPIRADO').addFields({name:'STATUS', value:'❌ Cancelado por tempo.'})], components: [] });
+                await interaction.editReply({ embeds: [gerarEmbed('#ff0000', 'EXPIRADO')], components: [] });
                 setTimeout(() => interaction.deleteReply().catch(() => {}), 30000);
             } else if (reason === 'lotado') {
-                // --- GERAR BRACKET DINÂMICA ---
                 const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
                 const p = shuffle([...inscritos]).map(id => interaction.guild.members.cache.get(id)?.displayName.slice(0, 8) || `User_${id.slice(0,3)}`);
                 
                 let bracket = "```\n";
-                if (vagas === 2) {
-                    bracket += `${p[0]} ─┐\n         ├─ 🏆 FINAL\n${p[1]} ─┘\n`;
-                } else if (vagas === 4) {
-                    bracket += `${p[0]} ─┐\n         ├─ Venc A ─┐\n${p[1]} ─┘         │\n                  ├─ 🏆 CAMPEÃO\n${p[2]} ─┐         │\n         ├─ Venc B ─┘\n${p[3]} ─┘\n`;
-                } else if (vagas === 8) {
-                    bracket += `${p[0]} ─┐\n     ├─ V1 ─┐\n${p[1]} ─┘      │\n            ├─ V5 ─┐\n${p[2]} ─┐      │      │\n     ├─ V2 ─┘      │\n${p[3]} ─┘            │\n                   ├─ 🏆 FINAL\n${p[4]} ─┐            │\n     ├─ V3 ─┐      │\n${p[5]} ─┘      │      │\n            ├─ V6 ─┘\n${p[6]} ─┐      │\n     ├─ V4 ─┘\n${p[7]} ─┘\n`;
-                }
+                if (vagas === 2) bracket += `${p[0]} ─┐\n         ├─ 🏆 FINAL\n${p[1]} ─┘\n`;
+                else if (vagas === 4) bracket += `${p[0]} ─┐\n         ├─ Venc A ─┐\n${p[1]} ─┘         │\n                  ├─ 🏆 CAMPEÃO\n${p[2]} ─┐         │\n         ├─ Venc B ─┘\n${p[3]} ─┘\n`;
                 bracket += "```";
 
-                const embedChave = new EmbedBuilder().setTitle(`⚔️ CHAVEAMENTO - ${modo}`).setColor('#00ff00').setDescription(`**PARTIDAS:**\n${bracket}`);
-                await interaction.editReply({ embeds: [embedChave], components: [] });
+                await interaction.editReply({ embeds: [new EmbedBuilder().setTitle(`⚔️ CHAVEAMENTO - ${modo}`).setColor('#00ff00').setDescription(bracket)], components: [] });
 
-                // --- CRIAR TÓPICOS PRIVADOS ---
+                // --- BUSCAR CANAL ESPECÍFICO ---
+                const canalConfrontos = interaction.guild.channels.cache.get(ID_CANAL_CONFRONTOS);
+                if (!canalConfrontos) return interaction.followUp({ content: '⚠️ Erro: Canal de confrontos não encontrado!', ephemeral: true });
+
                 for (let i = 0; i < inscritos.length; i += 2) {
                     const p1 = inscritos[i];
                     const p2 = inscritos[i+1];
                     const cod = Math.floor(1000 + Math.random() * 9000);
 
                     try {
-                        const thread = await interaction.channel.threads.create({
+                        const thread = await canalConfrontos.threads.create({
                             name: `SimuCH-${cod}`,
-                            type: ChannelType.PrivateThread,
-                            reason: 'Duelo Simulador',
+                            type: ChannelType.PrivateThread, // Requer Boost Nível 2 ou Permissão Admin no Bot
+                            reason: 'Duelo Simu',
                         });
 
                         await thread.members.add(p1);
                         await thread.members.add(p2);
 
                         const rowVenc = new ActionRowBuilder().addComponents(
-                            new ButtonBuilder().setCustomId(`v_${p1}`).setLabel(`Vencedor: ${p[i]}`).setStyle(ButtonStyle.Success),
-                            new ButtonBuilder().setCustomId(`v_${p2}`).setLabel(`Vencedor: ${p[i+1]}`).setStyle(ButtonStyle.Success)
+                            new ButtonBuilder().setCustomId(`v_${p1}`).setLabel(`Vencer P1`).setStyle(ButtonStyle.Success),
+                            new ButtonBuilder().setCustomId(`v_${p2}`).setLabel(`Vencer P2`).setStyle(ButtonStyle.Success)
                         );
 
-                        const msg = await thread.send({ content: `⚔️ **CONFRONTO INICIADO**\n<@${p1}> vs <@${p2}>`, components: [rowVenc] });
+                        const msg = await thread.send({ content: `⚔️ **CONFRONTO**\n<@${p1}> vs <@${p2}>`, components: [rowVenc] });
                         const staffCol = msg.createMessageComponentCollector({ componentType: ComponentType.Button });
 
                         staffCol.on('collect', async b => {
                             if (!b.member.roles.cache.has(ID_CARGO_STAFF)) return b.reply({ content: '❌ Apenas Staff!', ephemeral: true });
-                            const vencId = b.customId.replace('v_', '');
-                            await b.update({ content: `🏆 Vitória confirmada para: <@${vencId}>`, components: [] });
+                            await b.update({ content: `🏆 Vitória: <@${b.customId.replace('v_', '')}>`, components: [] });
                             setTimeout(() => thread.delete().catch(() => {}), 60000);
                         });
                     } catch (e) {
-                        interaction.followUp({ content: '⚠️ Erro ao criar tópicos. Verifique as permissões de **Tópicos Privados**!', ephemeral: true });
+                        console.error(e);
+                        interaction.followUp({ content: '❌ Falha ao criar tópico. Verifique se o Bot é **Administrador** ou se o canal tem **Boost Nível 2**.', ephemeral: true });
                         break;
                     }
                 }
