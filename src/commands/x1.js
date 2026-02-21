@@ -123,7 +123,7 @@ module.exports = {
         staffCol.on('collect', async b => {
             // TRAVA DE CARGO: Permite que QUALQUER Staff use
             if (!b.member.roles.cache.has(staffId)) {
-                return b.reply({ content: '❌ Apenas o criador pode declarar vitória!', ephemeral: true });
+                return b.reply({ content: '❌ Apenas staff pode declarar vitória!', ephemeral: true });
             }
 
             const vencedorId = b.customId.replace('vx1_', '');
