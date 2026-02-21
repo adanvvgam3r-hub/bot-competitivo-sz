@@ -4,33 +4,30 @@ const fs = require('fs');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('postar_ranking')
-        .setDescription('Cria a mensagem fixa do Ranking que atualiza sozinha')
-        // 🛡️ TRAVA DE INVISIBILIDADE: Apenas ADMs veem o comando na lista
+        .setDescription('🏆 Cria a mensagem fixa do Ranking que atualiza sozinha')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
-        const ID_CARGO_STAFF = '1453126709447754010';
-        const CONF_PATH = '/app/data/ranking_config.json';
-
-        // Verificação dupla por ID de cargo
-        if (!interaction.member.roles.cache.has(ID_CARGO_STAFF)) {
-            return interaction.reply({ content: '❌ Apenas a Staff pode configurar o ranking fixo!', ephemeral: true });
-        }
+        const RANK_CONFIG = '/app/data/ranking_config.json';
 
         const embed = new EmbedBuilder()
-            .setTitle('🏆 RANKING GERAL - TOP 10')
+            .setTitle('🏆 RANKING GERAL - ALPHA')
             .setColor('#f1c40f')
-            .setDescription('Aguardando a primeira final para carregar os dados...');
+            .setDescription('```md\n# Aguardando a primeira final para carregar os dados...\n```')
+            .setFooter({ text: 'Atualizado em tempo real pela Staff' })
+            .setTimestamp();
 
+        // Envia a mensagem fixa
         const msg = await interaction.reply({ embeds: [embed], fetchReply: true });
 
+        // Salva as coordenadas da mensagem no Volume do Railway
         const config = { 
-            rankingChannelId: interaction.channel.id, 
-            rankingMessageId: msg.id 
+            channelId: interaction.channel.id, 
+            messageId: msg.id 
         };
-
-        fs.writeFileSync(CONF_PATH, JSON.stringify(config, null, 2));
         
-        await interaction.followUp({ content: '✅ Ranking fixo configurado com sucesso!', ephemeral: true });
+        fs.writeFileSync(RANK_CONFIG, JSON.stringify(config, null, 2));
+        
+        await interaction.followUp({ content: '✅ **Mensagem de Ranking configurada!** Agora o bot sabe onde editar.', ephemeral: true });
     }
 };
