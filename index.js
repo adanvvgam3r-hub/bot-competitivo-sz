@@ -3,39 +3,41 @@ const fs = require('node:fs');
 const path = require('node:path');
 require('dotenv').config();
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent] });
 client.commands = new Collection();
 
-// 📂 Lendo a pasta de comandos automaticamente
+// 📂 CONFIGURAÇÃO DO VOLUME (RAILWAY)
+const dataDir = '/app/data';
+const files = ['ranking.json', 'partidas.json', 'ranking_config.json'];
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+files.forEach(f => {
+    const p = path.join(dataDir, f);
+    if (!fs.existsSync(p)) fs.writeFileSync(p, JSON.stringify({}));
+});
+
+// Handler de Comandos Automático
 const commandsPath = path.join(__dirname, 'src/commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 const commandsJSON = [];
 
 for (const file of commandFiles) {
-	const filePath = path.join(commandsPath, file);
-	const command = require(filePath);
-	if ('data' in command && 'execute' in command) {
-		client.commands.set(command.data.name, command);
-		commandsJSON.push(command.data.toJSON());
-	}
+    const command = require(path.join(commandsPath, file));
+    client.commands.set(command.data.name, command);
+    commandsJSON.push(command.data.toJSON());
 }
 
-// 🚀 Registrando os Slash Commands no Discord
-const rest = new REST().setToken(process.env.TOKEN);
+const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 (async () => {
-	try {
-		await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commandsJSON });
-		console.log('✅ Comandos carregados com sucesso!');
-	} catch (error) { console.error(error); }
+    try {
+        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commandsJSON });
+        console.log('✅ Comandos e Volume carregados!');
+    } catch (e) { console.error(e); }
 })();
 
-// 📥 Executando os comandos quando usados
-client.on('interactionCreate', async interaction => {
-	if (!interaction.isChatInputCommand()) return;
-	const command = client.commands.get(interaction.commandName);
-	if (!command) return;
-	try { await command.execute(interaction); } 
-    catch (error) { console.error(error); }
+client.on('interactionCreate', async i => {
+    if (!i.isChatInputCommand()) return;
+    const cmd = client.commands.get(i.commandName);
+    if (cmd) await cmd.execute(i);
 });
 
 client.login(process.env.TOKEN);
