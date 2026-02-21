@@ -1,184 +1,321 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ChannelType } = require('discord.js');
+const { 
+    SlashCommandBuilder, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    ComponentType, 
+    ChannelType,
+    StringSelectMenuBuilder,
+    PermissionFlagsBits
+} = require('discord.js');
 const fs = require('fs');
+const path = require('path');
+
+/**
+ * 🏆 ALPHA 2V2 TOURNAMENT ENGINE v5.0
+ * SISTEMA AVANÇADO DE GRADE, SELEÇÃO E CHAVEAMENTO POR RODADAS
+ * PERSISTÊNCIA EM VOLUME RAILWAY: /app/data/
+ */
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu2v2')
-        .setDescription('🏆 Simulador 2v2 Profissional - Grade e Chaveamento')
-        .addStringOption(o => o.setName('versao').setDescription('Ex: guys, beast ou priv').setRequired(true))
+        .setDescription('👑 [ALPHA] Simulador 2v2 Profissional com Grade de Seleção e Rodadas')
+        .addStringOption(o => o.setName('versao').setDescription('Versão (Ex: Guys, Beast, Priv)').setRequired(true))
         .addIntegerOption(o => o.setName('vagas').setDescription('Total de jogadores').setRequired(true).addChoices(
-            {name: '4 Jogadores (2 duplas)', value: 4},
-            {name: '8 Jogadores (4 duplas)', value: 8},
-            {name: '12 Jogadores (6 duplas)', value: 12}
+            { name: '4 Jogadores (2 Duplas - Final Direta)', value: 4 },
+            { name: '8 Jogadores (4 Duplas - Semis & Final)', value: 8 },
+            { name: '12 Jogadores (6 Duplas - Rodadas)', value: 12 }
         ))
-        .addStringOption(o => o.setName('mapa').setDescription('Mapa da partida').setRequired(true))
-        .addIntegerOption(o => o.setName('expira').setDescription('Minutos para expirar').setRequired(true)),
+        .addStringOption(o => o.setName('mapa').setDescription('Mapa da Competição').setRequired(true))
+        .addIntegerOption(o => o.setName('expira').setDescription('Minutos para inscrições').setRequired(true)),
 
     async execute(interaction) {
+        // --- CONSTANTES DE ACESSO ---
         const ID_STAFF = '1453126709447754010';
         const ID_ADV = '1467222875399393421';
         const ID_CANAL_TOPICOS = '1474560305492394106';
-        const RANK_PATH = '/app/data/ranking.json';
-        const CONFIG_PATH = '/app/data/ranking_config.json';
+        const ID_CANAL_AUDITORIA = '1473873994674606231';
+        
+        const PATH_RANKING = '/app/data/ranking.json';
+        const PATH_CONFIG = '/app/data/ranking_config.json';
+        const ORGANIZADOR_ID = interaction.user.id;
 
-        // 🔒 TRAVA: APENAS O CRIADOR CONTROLA A STAFF
-        const criadorId = interaction.user.id;
+        // --- VALIDAÇÕES ALPHA ---
+        if (interaction.member.roles.cache.has(ID_ADV)) {
+            return interaction.reply({ content: '⛔ **SISTEMA ALPHA:** Jogadores com advertência não podem gerenciar torneios.', ephemeral: true });
+        }
 
-        if (interaction.member.roles.cache.has(ID_ADV)) return interaction.reply({ content: '❌ Você possui uma **Advertência**!', ephemeral: true });
         if (!interaction.member.roles.cache.has(ID_STAFF) && interaction.user.id !== interaction.guild.ownerId) {
-            return interaction.reply({ content: '❌ Apenas Organizadores podem usar este comando!', ephemeral: true });
+            return interaction.reply({ content: '❌ **ACESSO NEGADO:** Exclusivo para Staff autorizada.', ephemeral: true });
         }
 
-        const v = interaction.options.getString('versao').toUpperCase();
-        const vagas = interaction.options.getInteger('vagas');
-        const mapa = interaction.options.getString('mapa').toUpperCase();
-        const expira = interaction.options.getInteger('expira');
+        const versaoInput = interaction.options.getString('versao').toUpperCase();
+        const vagasTotais = interaction.options.getInteger('vagas');
+        const mapaOficial = interaction.options.getString('mapa').toUpperCase();
+        const tempoLimite = interaction.options.getInteger('expira');
 
-        // 🗂️ ESTRUTURA DA GRADE
-        let duplas = [];
-        for (let i = 0; i < vagas / 2; i++) {
-            duplas.push({ id: i + 1, p1: null, p1n: null, p2: null, p2n: null, vencNome: null });
-        }
-
-        const gerarGrade = (cor = '#0099ff', status = '🟢 SELEÇÃO DE TIMES') => {
-            const embed = new EmbedBuilder()
-                .setTitle(`🏆 SIMULADOR 2V2 - ${status}`)
-                .setColor(cor)
-                .setDescription(`**MAPA:** \`${mapa}\` | **VERSÃO:** \`${v}\``)
-                .setFooter({ text: `Organizador: ${interaction.user.username} • alpha` });
-
-            duplas.forEach(d => {
-                const j1 = d.p1 ? `<@${d.p1}>` : '*Vazio*';
-                const j2 = d.p2 ? `<@${d.p2}>` : '*Vazio*';
-                embed.addFields({ name: `👥 DUPLA ${d.id}`, value: `**Slot A:** ${j1}\n**Slot B:** ${j2}`, inline: true });
+        // --- INICIALIZAÇÃO DA GRADE DE DUPLAS ---
+        let gradeDuplas = [];
+        for (let i = 0; i < vagasTotais / 2; i++) {
+            gradeDuplas.push({ 
+                id: i + 1, 
+                p1id: null, p1nome: null, 
+                p2id: null, p2nome: null, 
+                vencedora: false 
             });
+        }
+
+        // --- SISTEMA DE LOGS ---
+        const registrarAuditoria = async (desc, cor = '#3498db') => {
+            const canal = interaction.guild.channels.cache.get(ID_CANAL_AUDITORIA);
+            if (canal) {
+                const log = new EmbedBuilder().setTitle('🛡️ LOG 2V2 ALPHA').setDescription(desc).setColor(cor).setTimestamp();
+                await canal.send({ embeds: [log] });
+            }
+        };
+
+        // --- GESTÃO DE ARQUIVOS (VOLUME) ---
+        const lerDados = (p) => {
+            try { return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {}; }
+            catch (e) { return {}; }
+        };
+
+        const gravarDados = (p, d) => {
+            try { fs.writeFileSync(p, JSON.stringify(d, null, 4)); return true; }
+            catch (e) { return false; }
+        };
+
+        // --- INTERFACE VISUAL DA GRADE ---
+        const construirGradeEmbed = (cor = '#0099ff', status = '🟢 SELEÇÃO DE TIMES') => {
+            const embed = new EmbedBuilder()
+                .setTitle(`🏆 SIMULADOR 2V2 | ${status}`)
+                .setColor(cor)
+                .setDescription(`📊 **MAPA:** \`${mapaOficial}\` | **VERSÃO:** \`${versaoInput}\``)
+                .setThumbnail(interaction.guild.iconURL());
+
+            gradeDuplas.forEach(d => {
+                const j1 = d.p1id ? `<@${d.p1id}>` : '` Vazio `';
+                const j2 = d.p2id ? `<@${d.p2id}>` : '` Vazio `';
+                embed.addFields({ 
+                    name: `👥 DUPLA ${d.id}`, 
+                    value: `Slot A: ${j1}\nSlot B: ${j2}`, 
+                    inline: true 
+                });
+            });
+
+            embed.setFooter({ text: `Organizador: ${interaction.user.username} • alpha engine` });
             return embed;
         };
 
-        const gerarBotoes = () => {
-            const rows = [];
-            let row = new ActionRowBuilder();
-            duplas.forEach((d, idx) => {
-                if (row.components.length >= 4) { rows.push(row); row = new ActionRowBuilder(); }
-                row.addComponents(
-                    new ButtonBuilder().setCustomId(`d_${idx}_p1`).setLabel(`D${d.id}-A`).setStyle(ButtonStyle.Secondary).setDisabled(!!d.p1),
-                    new ButtonBuilder().setCustomId(`d_${idx}_p2`).setLabel(`D${d.id}-B`).setStyle(ButtonStyle.Secondary).setDisabled(!!d.p2)
-                );
-            });
-            rows.push(row);
-            return rows;
-        };
+        // --- ESCADA DE SELEÇÃO (MENU) ---
+        const menuSelecao = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('menu_dupla')
+                .setPlaceholder('[ ESCOLHA SEU TIME > ]')
+                .addOptions(gradeDuplas.map(d => ({
+                    label: `Entrar na Dupla ${d.id}`,
+                    value: `dupla_${d.id - 1}`,
+                    description: `Vagas disponíveis para o Time ${d.id}`
+                })))
+        );
 
-        const res = await interaction.reply({ embeds: [gerarGrade()], components: gerarBotoes() });
-        const colIns = res.createMessageComponentCollector({ componentType: ComponentType.Button, time: expira * 60000 });
-
-        colIns.on('collect', async i => {
-            const todosIds = duplas.flatMap(d => [d.p1, d.p2]);
-            if (todosIds.includes(i.user.id)) return i.reply({ content: '❌ Você já escolheu um slot!', ephemeral: true });
-
-            const [, dIdx, slot] = i.customId.split('_');
-            duplas[dIdx][slot] = i.user.id;
-            duplas[dIdx][slot + 'n'] = i.user.username.slice(0,6);
-
-            const total = duplas.flatMap(d => [d.p1, d.p2]).filter(id => id !== null).length;
-
-            if (total === vagas) colIns.stop('lotado');
-            else await i.update({ embeds: [gerarGrade()], components: gerarBotoes() });
+        const msgPrincipal = await interaction.reply({ 
+            embeds: [construirGradeEmbed()], 
+            components: [menuSelecao], 
+            fetchReply: true 
         });
 
-        colIns.on('end', async (collected, reason) => {
-            if (reason === 'lotado') {
-                // 🎨 DESENHO DA BRACKET 2V2
-                const desenhar = () => {
-                    let b = "```md\n# ⚔️ BRACKET 2V2 - ALPHA\n\n";
-                    const f = (d1, d2, vNome) => {
-                        const n1 = `${d1.p1n || '?'}+${d1.p2n || '?'}`;
-                        const n2 = `${d2.p1n || '?'}+${d2.p2n || '?'}`;
-                        if (!vNome) return `${n1} vs ${n2}`;
-                        return vNome === n1 ? `>${n1}< vs ${n2}` : `${n1} vs >${n2}<`;
-                    };
+        const coletorSelecao = msgPrincipal.createMessageComponentCollector({ 
+            time: tempoLimite * 60000 
+        });
 
-                    if (vagas === 4) {
-                        b += `[GRANDE FINAL]\n⭐ ${f(duplas[0], duplas[1], duplas[0].vencNome || duplas[1].vencNome)}\n`;
-                    } else if (vagas === 8) {
-                        b += `[SEMIFINAIS]\n1. ${f(duplas[0], duplas[1], duplas[0].vencNome)}\n2. ${f(duplas[2], duplas[3], duplas[2].vencNome)}\n\n`;
-                        b += `[GRANDE FINAL]\n⭐ FINALISTA A vs FINALISTA B\n`;
-                    }
-                    return b + "```";
+        // --- LÓGICA DE PREENCHIMENTO DA GRADE ---
+        coletorSelecao.on('collect', async i => {
+            const todosInscritos = gradeDuplas.flatMap(d => [d.p1id, d.p2id]);
+            
+            if (i.isStringSelectMenu()) {
+                if (todosInscritos.includes(i.user.id)) {
+                    return i.reply({ content: '⚠️ Você já ocupa um slot nesta grade.', ephemeral: true });
+                }
+
+                const dIdx = parseInt(i.values[0].split('_')[1]);
+                const btnsSlots = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`slot_${dIdx}_p1id`)
+                        .setLabel(`Entrar Slot A (D${dIdx + 1})`)
+                        .setStyle(ButtonStyle.Primary)
+                        .setDisabled(!!gradeDuplas[dIdx].p1id),
+                    new ButtonBuilder()
+                        .setCustomId(`slot_${dIdx}_p2id`)
+                        .setLabel(`Entrar Slot B (D${dIdx + 1})`)
+                        .setStyle(ButtonStyle.Primary)
+                        .setDisabled(!!gradeDuplas[dIdx].p2id)
+                );
+
+                return i.reply({ 
+                    content: `Você selecionou a **Dupla ${dIdx + 1}**. Escolha seu slot:`, 
+                    components: [btnsSlots], 
+                    ephemeral: true 
+                });
+            }
+
+            if (i.isButton()) {
+                const [, dIdx, campo] = i.customId.split('_');
+                const index = parseInt(dIdx);
+
+                if (gradeDuplas[index][campo]) {
+                    return i.reply({ content: '❌ Slot preenchido por outro jogador.', ephemeral: true });
+                }
+
+                gradeDuplas[index][campo] = i.user.id;
+                gradeDuplas[index][campo.replace('id', 'nome')] = i.user.username.slice(0,8);
+
+                const total = gradeDuplas.flatMap(d => [d.p1id, d.p2id]).filter(v => v !== null).length;
+
+                await i.update({ content: `✅ Você entrou na **Dupla ${index + 1}**!`, components: [] });
+                
+                if (total === vagasTotais) {
+                    coletorSelecao.stop('lotado');
+                } else {
+                    await interaction.editReply({ embeds: [construirGradeEmbed()] });
+                }
+            }
+        });
+
+        coletorSelecao.on('end', async (collected, reason) => {
+            if (reason === 'lotado') {
+                // --- INICIALIZAÇÃO DA BRACKET DE RODADAS ---
+                let bracket2v2 = {
+                    semis: [],
+                    final: { d1: null, d2: null, vNome: null }
                 };
 
-                await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('⚔️ GRADE FECHADA').setDescription(desenhar()).setColor('#00ff00')], components: [] });
+                if (vagasTotais === 4) {
+                    bracket2v2.final = { d1: gradeDuplas[0], d2: gradeDuplas[1], vNome: null };
+                } else {
+                    // Mapeia Semis para 8 jogadores
+                    for(let i=0; i<gradeDuplas.length; i+=2) {
+                        bracket2v2.semis.push({ d1: gradeDuplas[i], d2: gradeDuplas[i+1], vNome: null });
+                    }
+                    bracket2v2.final = { d1: {nome: "Vencedor A"}, d2: {nome: "Vencedor B"}, vNome: null };
+                }
 
-                const canal = interaction.guild.channels.cache.get(ID_CANAL_TOPICOS);
+                const gerarMarkdownBracket = () => {
+                    let md = "```md\n# ⚔️ BRACKET 2V2 OFICIAL\n\n";
+                    const f = (m) => {
+                        const n1 = m.d1.nome || `${m.d1.p1nome}+${m.d1.p2nome}`;
+                        const n2 = m.d2.nome || `${m.d2.p1nome}+${m.d2.p2nome}`;
+                        if (!m.vNome) return `${n1.padEnd(15)} vs ${n2}`;
+                        return m.vNome === n1 ? `>${n1}<`.padEnd(17) + ` vs ${n2}` : `${n1.padEnd(15)} vs >${n2}<`;
+                    };
 
-                // 🕹️ GERENCIADOR DE CONFRONTOS 2V2
-                const iniciarMatch = async (d1, d2, index) => {
-                    const thread = await canal.threads.create({ 
-                        name: `Simu2v2-D${d1.id}-vs-D${d2.id}`, 
-                        type: ChannelType.PrivateThread 
+                    if (vagasTotais === 8) {
+                        md += `[SEMIFINAIS]\n1. ${f(bracket2v2.semis[0])}\n2. ${f(bracket2v2.semis[1])}\n\n`;
+                    }
+                    md += `[GRANDE FINAL]\n⭐ ${f(bracket2v2.final)}\n`;
+                    if (bracket2v2.final.vNome) md += `\n🏆 CAMPEÕES: ${bracket2v2.final.vNome.toUpperCase()}`;
+                    return md + "```";
+                };
+
+                await interaction.editReply({ 
+                    content: '🏁 **Grade Fechada!** Gerando confrontos...', 
+                    embeds: [new EmbedBuilder().setTitle('⚔️ CHAVEAMENTO ALPHA 2V2').setDescription(gerarMarkdownBracket()).setColor('#00ff00')], 
+                    components: [] 
+                });
+
+                const canalThreads = interaction.guild.channels.cache.get(ID_CANAL_TOPICOS);
+
+                // --- MOTOR DE CONFRONTOS 2V2 ---
+                const dispararDuelo2v2 = async (match, fase, idx) => {
+                    const thread = await canalThreads.threads.create({
+                        name: `2v2-${match.d1.id || 'A'}-vs-${match.d2.id || 'B'}`,
+                        type: ChannelType.PrivateThread
                     });
 
-                    [d1.p1, d1.p2, d2.p1, d2.p2].forEach(id => thread.members.add(id));
+                    [match.d1.p1id, match.d1.p2id, match.d2.p1id, match.d2.p2id].forEach(id => {
+                        if (id) thread.members.add(id);
+                    });
+
+                    const n1 = match.d1.nome || `${match.d1.p1nome}+${match.d1.p2nome}`;
+                    const n2 = match.d2.nome || `${match.d2.p1nome}+${match.d2.p2nome}`;
 
                     const rowV = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('v1').setLabel(`Vencer Dupla ${d1.id}`).setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('v2').setLabel(`Vencer Dupla ${d2.id}`).setStyle(ButtonStyle.Danger)
+                        new ButtonBuilder().setCustomId('v1').setLabel(`Vencer: ${n1}`).setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId('v2').setLabel(`Vencer: ${n2}`).setStyle(ButtonStyle.Danger)
                     );
 
-                    const msgT = await thread.send({ 
-                        content: `🏆 <@${criadorId}>, declare o vencedor:\nDupla ${d1.id} (<@${d1.p1}>+<@${d1.p2}>) vs Dupla ${d2.id} (<@${d2.p1}>+<@${d2.p2}>)`, 
-                        components: [rowV] 
+                    const msgT = await thread.send({
+                        content: `🏆 <@${ORGANIZADOR_ID}>, declare o resultado:\n**${n1}** vs **${n2}**`,
+                        components: [rowV]
                     });
 
                     const sCol = msgT.createMessageComponentCollector();
-
                     sCol.on('collect', async b => {
-                        // 🔐 TRAVA DE CRIADOR
-                        if (b.user.id !== criadorId) return b.reply({ content: `❌ Apenas <@${criadorId}> pode declarar vitória!`, ephemeral: true });
+                        if (b.user.id !== ORGANIZADOR_ID) {
+                            return b.reply({ content: `❌ Bloqueio Organizador: Apenas <@${ORGANIZADOR_ID}> pode validar o resultado.`, ephemeral: true });
+                        }
 
-                        const vD = b.customId === 'v1' ? d1 : d2;
-                        const pD = b.customId === 'v1' ? d2 : d1;
-                        const vNome = `${vD.p1n}+${vD.p2n}`;
+                        const winDupla = b.customId === 'v1' ? match.d1 : match.d2;
+                        const loseDupla = b.customId === 'v1' ? match.d2 : match.d1;
+                        const winNome = b.customId === 'v1' ? n1 : n2;
 
-                        // Atualiza Visu
-                        duplas[duplas.indexOf(vD)].vencNome = vNome;
+                        if (fase === 'semis') {
+                            bracket2v2.semis[idx].vNome = winNome;
+                            // Avança para a final (simples)
+                            const finalPos = idx === 0 ? 'd1' : 'd2';
+                            bracket2v2.final[finalPos] = { nome: winNome, p1id: winDupla.p1id, p2id: winDupla.p2id, p1nome: winDupla.p1nome, p2nome: winDupla.p2nome };
+                        } else {
+                            bracket2v2.final.vNome = winNome;
+                            // --- ATUALIZAÇÃO RANKING DUPLO ---
+                            let rank = lerDados(PATH_RANKING);
+                            [winDupla.p1id, winDupla.p2id].forEach(id => {
+                                if (!rank[id]) rank[id] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
+                                rank[id].simuV += 1;
+                            });
+                            [loseDupla.p1id, loseDupla.p2id].forEach(id => {
+                                if (!rank[id]) rank[id] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
+                                rank[id].simuP += 1; // VICE
+                            });
+                            gravarDados(PATH_RANKING, rank);
 
-                        // 💾 SALVAMENTO NO RANKING
-                        let rData = JSON.parse(fs.readFileSync(RANK_PATH, 'utf8'));
-                        [vD.p1, vD.p2].forEach(id => {
-                            if(!rData[id]) rData[id] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
-                            rData[id].simuV += 1;
+                            // --- ATUALIZAÇÃO GRADE FIXA ---
+                            try {
+                                const conf = lerDados(PATH_CONFIG);
+                                const canalR = await interaction.guild.channels.fetch(conf.channelId);
+                                const msgR = await canalR.messages.fetch(conf.messageId);
+                                const top10 = Object.entries(rank).sort((a,b) => b[1].simuV - a[1].simuV).slice(0,10);
+                                
+                                let tabela = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
+                                top10.forEach((u, i) => {
+                                    const nomeU = interaction.guild.members.cache.get(u[0])?.displayName.slice(0,12) || "Player";
+                                    tabela += `${(i+1).toString().padEnd(3)}  ${nomeU.padEnd(14)}  ${u[1].simuV.toString().padEnd(5)}  ${u[1].simuP}\n`;
+                                });
+                                await msgR.edit({ embeds: [new EmbedBuilder().setTitle('🏆 RANKING GERAL - ALPHA').setColor('#f1c40f').setDescription(tabela + "```")] });
+                            } catch (err) {}
+                        }
+
+                        await interaction.editReply({ 
+                            embeds: [new EmbedBuilder().setTitle('⚔️ BRACKET 2V2 ATUALIZADA').setDescription(gerarMarkdownBracket()).setColor('#ffff00')] 
                         });
-                        [pD.p1, pD.p2].forEach(id => {
-                            if(!rData[id]) rData[id] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
-                            rData[id].simuP += 1;
-                        });
-                        fs.writeFileSync(RANK_PATH, JSON.stringify(rData, null, 2));
 
-                        // 📢 ATUALIZAR MENSAGEM FIXA
-                        try {
-                            const conf = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-                            const ch = await interaction.guild.channels.fetch(conf.channelId);
-                            const mF = await ch.messages.fetch(conf.messageId);
-                            const top10 = Object.entries(rData).sort((a,b) => b.simuV - a.simuV).slice(0,10);
-                            const emb = new EmbedBuilder().setTitle('🏆 RANKING GERAL - ALPHA').setColor('#f1c40f')
-                                .setDescription(top10.map((u, i) => `${i+1}º | <@${u}> — **${u.simuV} Vitórias**`).join('\n'));
-                            await mF.edit({ embeds: [emb] });
-                        } catch (e) { console.log("Ranking fixo offline."); }
-
-                        await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('⚔️ BRACKET 2V2 ATUALIZADA').setDescription(desenhar()).setColor('#ffff00')] });
-                        await b.update({ content: `🏆 Vitória da Dupla ${vD.id} confirmada!`, components: [] });
-                        setTimeout(() => thread.delete().catch(() => {}), 10000);
+                        await b.update({ content: `✅ Resultado processado. Vitória da Dupla: **${winNome}**`, components: [], embeds: [] });
+                        await registrarAuditoria(`Vencedores 2v2: ${winNome} declarado por ${interaction.user.tag}`);
+                        setTimeout(() => thread.delete().catch(() => {}), 15000);
                     });
                 };
 
-                // DISPARA OS CONFRONTOS
-                for(let i=0; i<duplas.length; i+=2) {
-                    if (duplas[i+1]) iniciarMatch(duplas[i], duplas[i+1], i);
+                // DISPARO INICIAL
+                if (vagasTotais === 4) {
+                    await dispararDuelo2v2(bracket2v2.final, 'final', 0);
+                } else {
+                    for(let i=0; i<bracket2v2.semis.length; i++) {
+                        await dispararDuelo2v2(bracket2v2.semis[i], 'semis', i);
+                    }
                 }
-
             } else if (reason === 'time') {
-                await interaction.editReply({ content: '❌ Simu expirado.', embeds: [], components: [] });
+                await interaction.editReply({ content: '❌ Inscrições expiradas.', embeds: [], components: [] });
             }
         });
     }
