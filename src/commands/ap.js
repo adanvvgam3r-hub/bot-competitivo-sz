@@ -8,7 +8,7 @@ module.exports = {
         .addStringOption(o => o.setName('versao').setRequired(true).setDescription('guys'))
         .addStringOption(o => o.setName('mapa').setRequired(true).setDescription('mapa'))
         .addNumberOption(o => o.setName('valor').setRequired(true).setDescription('R$'))
-        .addIntegerOption(o => o.setName('rodadas').setRequired(true).addChoices({name:'5',value:5},{name:'7',value:7}))
+        .addIntegerOption(o => o.setName('rodadas').setDescription('Quantidade de rodadas').setRequired(true).addChoices({name:'5',value:5},{name:'7',value:7}))
         .addUserOption(o => o.setName('desafiar').setDescription('Oponente')),
 
     async execute(interaction) {
