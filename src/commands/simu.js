@@ -130,7 +130,7 @@ module.exports = {
 
                         await interaction.editReply({ embeds: [new EmbedBuilder().setTitle(`⚔️ BRACKET ATUALIZADA`).setColor('#ffff00').setDescription(desenharBracket(bData))] });
                         await b.editReply({ content: `🏆 Vitória confirmada para: <@${vencedorId}>`, components: [] });
-                        setTimeout(() => thread.delete().catch(() => {}), 10000);
+                        setTimeout(() => thread.delete().catch(() => {}), 2000);
                     });
                 }
             } else if (reason === 'time') {
