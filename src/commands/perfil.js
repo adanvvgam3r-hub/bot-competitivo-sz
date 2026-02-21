@@ -17,20 +17,15 @@ module.exports = {
             if (all[target.id]) d = { ...d, ...all[target.id] };
         }
 
-        const hasData = Object.values(d).some(v => v > 0);
         const embed = new EmbedBuilder()
             .setTitle(`PERFIL ALPHA - ${target.username}`)
             .setThumbnail(target.displayAvatarURL())
-            .setColor('#8b00ff');
-
-        if (!hasData) embed.setDescription('❌ Sem dados registrados.');
-        else {
-            embed.addFields(
+            .setColor('#8b00ff')
+            .addFields(
                 { name: '🏆 SIMUS', value: `V: ${d.simuV} | Vice: ${d.simuP}`, inline: true },
                 { name: '💰 AP', value: `V: ${d.apV} | P: ${d.apP}`, inline: true },
                 { name: '⚔️ X1', value: `V: ${d.x1V} | P: ${d.x1P}`, inline: true }
             );
-        }
         await interaction.reply({ embeds: [embed] });
     }
 };
