@@ -11,13 +11,19 @@ module.exports = {
         .addIntegerOption(o => o.setName('expira').setDescription('Minutos').setRequired(true)),
 
     async execute(interaction) {
-        const ID_STAFF = '1453126709447754010'; // CARGO PERMITIDO
+        const ID_STAFF = '1453126709447754010';
+        const CANAL_PERMITIDO = '1465842384586670254'; // CANAL DE INSCRIÇÕES
         const ID_CONFRONTOS = '1474560305492394106';
         const PATH = '/app/data/ranking.json';
         const CONFIG_PATH = '/app/data/ranking_config.json';
         const ORGANIZADOR_ID = interaction.user.id;
 
-        // 🛡️ BLOQUEIO DE QUEM NÃO TEM O CARGO
+        // 🛡️ TRAVA DE CANAL
+        if (interaction.channel.id !== CANAL_PERMITIDO) {
+            return interaction.reply({ content: `❌ Este comando só pode ser usado no canal <@#${CANAL_PERMITIDO}>!`, ephemeral: true });
+        }
+
+        // 🛡️ TRAVA DE CARGO
         if (!interaction.member.roles.cache.has(ID_STAFF)) {
             return interaction.reply({ content: '❌ Você não tem permissão para iniciar um simulador!', ephemeral: true });
         }
@@ -82,7 +88,7 @@ module.exports = {
                     const vTime = isA ? tA : tB; const pTime = isA ? tB : tA;
                     const finalIdx = (vagas === 4) ? 0 : 1;
 
-                    if (parseInt(b.customId.split('_')[1]) === finalIdx) {
+                    if (parseInt(b.customId.slice(-1)) === finalIdx) {
                         const data = JSON.parse(fs.readFileSync(PATH, 'utf8'));
                         [...vTime, ...pTime].forEach(id => { if(!data[id]) data[id] = { simuV:0, simuP:0, apV:0, apP:0, x1V:0, x1P:0 }; });
                         vTime.forEach(id => data[id].simuV += 1); pTime.forEach(id => data[id].simuP += 1);
