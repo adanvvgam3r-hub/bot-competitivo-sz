@@ -4,20 +4,23 @@ const fs = require('fs');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu2v2')
-        .setDescription('Inicia um simulador 2v2 por times')
+        .setDescription('Inicia um simulador 2v2')
         .addStringOption(o => o.setName('versao').setDescription('Versão').setRequired(true))
         .addIntegerOption(o => o.setName('vagas').setDescription('Total jogadores').setRequired(true).addChoices({name:'4 (2 Times)',value:4},{name:'8 (4 Times)',value:8}))
         .addStringOption(o => o.setName('mapa').setDescription('Mapa').setRequired(true))
         .addIntegerOption(o => o.setName('expira').setDescription('Minutos').setRequired(true)),
 
     async execute(interaction) {
-        const ID_STAFF = '1453126709447754010';
+        const ID_STAFF = '1453126709447754010'; // CARGO PERMITIDO
         const ID_CONFRONTOS = '1474560305492394106';
         const PATH = '/app/data/ranking.json';
         const CONFIG_PATH = '/app/data/ranking_config.json';
         const ORGANIZADOR_ID = interaction.user.id;
 
-        if (!interaction.member.roles.cache.has(ID_STAFF)) return interaction.reply({ content: '❌ Staff apenas!', ephemeral: true });
+        // 🛡️ BLOQUEIO DE QUEM NÃO TEM O CARGO
+        if (!interaction.member.roles.cache.has(ID_STAFF)) {
+            return interaction.reply({ content: '❌ Você não tem permissão para iniciar um simulador!', ephemeral: true });
+        }
 
         const vagas = interaction.options.getInteger('vagas');
         const versao = interaction.options.getString('versao').toUpperCase();
@@ -33,7 +36,7 @@ module.exports = {
             }).join('\n');
             const desc = encerrado ? '✅ **INSCRIÇÕES ENCERRADAS - SIMULADOR INICIADO**' : `Expira em <t:${Math.floor((Date.now() + expiraMin * 60000) / 1000)}:R>`;
             return new EmbedBuilder()
-                .setTitle('🏆 SIMULADOR 2V2 - SELEÇÃO DE TIMES')
+                .setTitle('🏆 SIMULADOR 2V2')
                 .setColor(encerrado ? '#00ff00' : '#2ecc71')
                 .setDescription(`${desc}\n\n**VERSÃO:** ${versao}\n**MAPA:** ${mapa}\n\n**PARTICIPANTES:**\n${lista}`)
                 .setFooter({ text: `Jogadores: ${slots.filter(s => s !== null).length}/${vagas}` });
@@ -70,7 +73,7 @@ module.exports = {
                     new ButtonBuilder().setCustomId(`v2a_${idx}`).setLabel('Vencer Time A').setStyle(ButtonStyle.Success),
                     new ButtonBuilder().setCustomId(`v2b_${idx}`).setLabel('Vencer Time B').setStyle(ButtonStyle.Success)
                 );
-                const m = await th.send({ content: `⚔️ **TIME A:** <@${tA[0]}> & <@${tA[1]}>\n**TIME B:** <@${tB[0]}> & <@${tB[1]}>\n**Org:** <@${ORGANIZADOR_ID}>`, components: [rowV] });
+                const m = await th.send({ content: `⚔️ **TIME A:** <@${tA}> & <@${tA[1]}>\n**TIME B:** <@${tB}> & <@${tB[1]}>\n**Org:** <@${ORGANIZADOR_ID}>`, components: [rowV] });
                 const sCol = m.createMessageComponentCollector();
 
                 sCol.on('collect', async b => {
@@ -79,22 +82,21 @@ module.exports = {
                     const vTime = isA ? tA : tB; const pTime = isA ? tB : tA;
                     const finalIdx = (vagas === 4) ? 0 : 1;
 
-                    if (parseInt(b.customId.slice(-1)) === finalIdx) {
+                    if (parseInt(b.customId.split('_')[1]) === finalIdx) {
                         const data = JSON.parse(fs.readFileSync(PATH, 'utf8'));
                         [...vTime, ...pTime].forEach(id => { if(!data[id]) data[id] = { simuV:0, simuP:0, apV:0, apP:0, x1V:0, x1P:0 }; });
                         vTime.forEach(id => data[id].simuV += 1); pTime.forEach(id => data[id].simuP += 1);
                         fs.writeFileSync(PATH, JSON.stringify(data, null, 2));
 
-                        // --- ATUALIZAR RANKING AUTOMÁTICO ---
                         if (fs.existsSync(CONFIG_PATH)) {
                             const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
                             const rChan = await interaction.guild.channels.fetch(config.channelId);
                             const rMsg = await rChan.messages.fetch(config.messageId);
-                            const top10 = Object.entries(data).sort((a,b) => b[1].simuV - a[1].simuV).slice(0, 10);
+                            const top10 = Object.entries(data).sort((a,b) => (b[1].simuV || 0) - (a[1].simuV || 0)).slice(0, 10);
                             let grade = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
                             top10.forEach(([id, s], i) => {
                                 const n = (interaction.guild.members.cache.get(id)?.displayName || "Player").slice(0,12).padEnd(12,' ');
-                                grade += `${(i+1).toString().padEnd(3,' ')}  ${n}    ${s.simuV.toString().padEnd(4,' ')}   ${s.simuP.toString().padEnd(4,' ')}\n`;
+                                grade += `${(i+1).toString().padEnd(3,' ')}  ${n}    ${(s.simuV || 0).toString().padEnd(4,' ')}   ${(s.simuP || 0).toString().padEnd(4,' ')}\n`;
                             });
                             grade += "```";
                             const nEmb = EmbedBuilder.from(rMsg.embeds[0]).setDescription(grade);
