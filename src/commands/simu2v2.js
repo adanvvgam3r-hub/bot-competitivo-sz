@@ -1,14 +1,14 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const fs = require('fs');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu2v2')
-        .setDescription('Inicia um simulador 2v2 com lista de participantes')
-        .addStringOption(o => o.setName('versao').setDescription('Ex: guys, beast ou priv').setRequired(true))
-        .addIntegerOption(o => o.setName('vagas').setDescription('Total de jogadores (Ex: 4 = 2 duplas)').setRequired(true).addChoices({name:'4',value:4},{name:'8',value:8}))
-        .addStringOption(o => o.setName('mapa').setDescription('Mapa da partida').setRequired(true))
-        .addIntegerOption(o => o.setName('expira').setDescription('Minutos para expirar').setRequired(true)),
+        .setDescription('Inicia um simulador 2v2 com escolha de vagas')
+        .addStringOption(o => o.setName('versao').setDescription('Versão').setRequired(true))
+        .addIntegerOption(o => o.setName('vagas').setDescription('Total de jogadores').setRequired(true).addChoices({name:'4 (2 duplas)',value:4},{name:'8 (4 duplas)',value:8}))
+        .addStringOption(o => o.setName('mapa').setDescription('Mapa').setRequired(true))
+        .addIntegerOption(o => o.setName('expira').setDescription('Minutos').setRequired(true)),
 
     async execute(interaction) {
         const ID_STAFF = '1453126709447754010';
@@ -22,80 +22,94 @@ module.exports = {
         const versao = interaction.options.getString('versao').toUpperCase();
         const mapa = interaction.options.getString('mapa').toUpperCase();
         const expiraMin = interaction.options.getInteger('expira');
-        let inscritos = [];
+        
+        // Inicializa os slots vazios
+        let slots = Array(vagas).fill(null);
 
         const gerarEmbed = () => {
-            const listaParticipantes = inscritos.length > 0 
-                ? inscritos.map(id => `- <@${id}>`).join('\n') 
-                : '-';
+            const listaSorteada = slots.map((user, i) => `${i + 1}. ${user ? `<@${user}>` : '----'}`).join('\n');
+            const inscritosCount = slots.filter(s => s !== null).length;
 
             return new EmbedBuilder()
-                .setTitle('🏆 SIMULADOR 2V2')
-                .setColor('#2ecc71') // Verde para diferenciar do 1v1
-                .setDescription(`Expira em <t:${Math.floor((Date.now() + expiraMin * 60000) / 1000)}:R>`)
-                .addFields(
-                    { name: 'VERSÃO:', value: versao, inline: true },
-                    { name: 'MAPA:', value: mapa, inline: true },
-                    { name: 'PARTICIPANTES:', value: listaParticipantes, inline: false }
-                )
-                .setFooter({ text: `Vagas: ${inscritos.length}/${vagas}` });
+                .setTitle('🏆 SIMULADOR 2V2 - ESCOLHA SEU SLOT')
+                .setColor('#2ecc71')
+                .setDescription(`Expira em <t:${Math.floor((Date.now() + expiraMin * 60000) / 1000)}:R>\n\n**VERSÃO:** ${versao}\n**MAPA:** ${mapa}\n\n**PARTICIPANTES:**\n${listaSorteada}`)
+                .setFooter({ text: `Vagas preenchidas: ${inscritosCount}/${vagas} | Duplas: 1&2, 3&4, 5&6, 7&8` });
         };
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('in_2v2').setLabel('ENTRAR').setStyle(ButtonStyle.Primary)
-        );
-        
+        const menu = new StringSelectMenuBuilder()
+            .setCustomId('selecionar_vaga')
+            .setPlaceholder('Escolha sua vaga no simulador')
+            .addOptions(
+                Array.from({ length: vagas }, (_, i) => 
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(`Vaga ${i + 1}`)
+                        .setValue(`${i}`)
+                )
+            );
+
+        const row = new ActionRowBuilder().addComponents(menu);
         const res = await interaction.reply({ embeds: [gerarEmbed()], components: [row] });
+
         const col = res.createMessageComponentCollector({ time: expiraMin * 60000 });
 
         col.on('collect', async i => {
-            if (inscritos.includes(i.user.id)) return i.reply({ content: 'Já inscrito!', ephemeral: true });
-            if (inscritos.length >= vagas) return i.reply({ content: 'Vagas lotadas!', ephemeral: true });
+            if (i.customId === 'selecionar_vaga') {
+                const vagaEscolhida = parseInt(i.values[0]);
 
-            inscritos.push(i.user.id);
-            if (inscritos.length === vagas) col.stop('lotado');
-            else await i.update({ embeds: [gerarEmbed()] });
+                // Verifica se o jogador já está em outra vaga
+                if (slots.includes(i.user.id)) {
+                    return i.reply({ content: '❌ Você já está inscrito em uma vaga!', ephemeral: true });
+                }
+
+                // Verifica se a vaga já foi ocupada
+                if (slots[vagaEscolhida] !== null) {
+                    return i.reply({ content: '❌ Esta vaga já foi preenchida por outro jogador!', ephemeral: true });
+                }
+
+                slots[vagaEscolhida] = i.user.id;
+                const lotado = slots.every(s => s !== null);
+
+                if (lotado) col.stop('lotado');
+                else await i.update({ embeds: [gerarEmbed()] });
+            }
         });
 
         col.on('end', async (collected, reason) => {
-            if (reason !== 'lotado') return interaction.editReply({ content: '❌ Inscrições encerradas.', embeds: [], components: [] });
+            if (reason !== 'lotado') return interaction.editReply({ content: '❌ Tempo expirado.', embeds: [], components: [] });
 
-            const players = [...inscritos].sort(() => Math.random() - 0.5);
-            await interaction.editReply({ content: '⚔️ **Times formados! Gerando tópicos de 2v2...**', embeds: [gerarEmbed()], components: [] });
-
+            await interaction.editReply({ content: '⚔️ **Vagas lotadas! Criando duplas por slots...**', components: [] });
             const canal = interaction.guild.channels.cache.get(ID_CONFRONTOS);
-            for (let i = 0; i < players.length; i += 4) {
-                const idx = i/4; 
-                const timeA = [players[i], players[i+1]];
-                const timeB = [players[i+2], players[i+3]];
 
-                const th = await canal.threads.create({ name: `2v2-Duelo-${idx}`, type: ChannelType.PrivateThread });
+            // Formação de Duplas: 0&1 vs 2&3, etc.
+            for (let i = 0; i < slots.length; i += 4) {
+                const idx = i/4;
+                const timeA = [slots[i], slots[i+1]];
+                const timeB = [slots[i+2], slots[i+3]];
+
+                const th = await canal.threads.create({ name: `2v2-Slot-Duelo-${idx}`, type: ChannelType.PrivateThread });
                 [...timeA, ...timeB].forEach(id => th.members.add(id).catch(() => {}));
 
-                const bt = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`v2_a_${idx}`).setLabel('Vencer Time A').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId(`v2_b_${idx}`).setLabel('Vencer Time B').setStyle(ButtonStyle.Success)
+                const rowV = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`v2a_${idx}`).setLabel('Vencer Time A (Slots 1&2)').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId(`v2b_${idx}`).setLabel('Vencer Time B (Slots 3&4)').setStyle(ButtonStyle.Success)
                 );
 
-                const m = await th.send({ 
-                    content: `⚔️ **CONFRONTO 2V2**\n**TIME A:** <@${timeA[0]}> & <@${timeA[1]}>\n**VS**\n**TIME B:** <@${timeB[0]}> & <@${timeB[1]}>\n\n**Organizador:** <@${ORGANIZADOR_ID}>`, 
-                    components: [bt] 
+                const msgT = await th.send({ 
+                    content: `⚔️ **CONFRONTO 2V2 (SLOTS)**\n**TIME A:** <@${timeA[0]}> & <@${timeA[1]}>\n**VS**\n**TIME B:** <@${timeB[0]}> & <@${timeB[1]}>\n\n**Organizador:** <@${ORGANIZADOR_ID}>`, 
+                    components: [rowV] 
                 });
 
-                const sCol = m.createMessageComponentCollector();
-
+                const sCol = msgT.createMessageComponentCollector();
                 sCol.on('collect', async b => {
-                    if (b.user.id !== ORGANIZADOR_ID) {
-                        return b.reply({ content: `❌ Apenas o organizador (<@${ORGANIZADOR_ID}>) pode declarar o vencedor!`, ephemeral: true });
-                    }
+                    if (b.user.id !== ORGANIZADOR_ID) return b.reply({ content: 'Apenas o organizador pode declarar!', ephemeral: true });
                     
-                    const venceuA = b.customId.includes('_a_');
+                    const venceuA = b.customId.includes('v2a');
                     const vTime = venceuA ? timeA : timeB;
                     const pTime = venceuA ? timeB : timeA;
 
-                    // Final: idx 0 para 4 vagas, idx 1 para 8 vagas
-                    const finalIdx = (vagas === 4) ? 0 : 1;
-                    if (parseInt(b.customId.split('_')[2]) === finalIdx) {
+                    // Final: idx 0 (4 vagas) ou idx 1 (8 vagas)
+                    if (parseInt(b.customId.slice(-1)) === (vagas === 4 ? 0 : 1)) {
                         const data = JSON.parse(fs.readFileSync(PATH, 'utf8'));
                         [...vTime, ...pTime].forEach(id => { if(!data[id]) data[id] = { simuV:0, simuP:0, apV:0, apP:0, x1V:0, x1P:0 }; });
                         vTime.forEach(id => data[id].simuV += 1);
