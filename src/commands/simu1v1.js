@@ -1,225 +1,341 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ChannelType } = require('discord.js');
+const { 
+    SlashCommandBuilder, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    ComponentType, 
+    ChannelType,
+    PermissionFlagsBits
+} = require('discord.js');
 const fs = require('fs');
+const path = require('path');
+
+/**
+ * 🏆 ALPHA TOURNAMENT ENGINE v4.0
+ * ENGINE DE ALTA PERFORMANCE COM BRACKET DINÂMICA E LOGS DE AUDITORIA
+ * CONFIGURADO PARA VOLUME RAILWAY: /app/data/
+ */
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu1v1')
-        .setDescription('🏆 Simulador 1v1 Profissional - Todas as Vagas')
-        .addStringOption(o => o.setName('versao').setDescription('guys, beast, priv').setRequired(true))
-        .addIntegerOption(o => o.setName('vagas').setDescription('Quantidade de Vagas').setRequired(true).addChoices(
-            { name: '2 (Final Direta)', value: 2 },
-            { name: '4 (Semis e Final)', value: 4 },
-            { name: '8 (Quartas, Semis e Final)', value: 8 },
-            { name: '16 (Oitavas até Final)', value: 16 }
+        .setDescription('👑 [ALPHA] Simulador Profissional com Bracket Dinâmica e Ranking em Grade')
+        .addStringOption(o => o.setName('versao').setDescription('Versão do Jogo (Ex: Guys, Beast, Priv)').setRequired(true))
+        .addIntegerOption(o => o.setName('vagas').setDescription('Capacidade de Jogadores').setRequired(true).addChoices(
+            { name: '2 Jogadores (Final Direta)', value: 2 },
+            { name: '4 Jogadores (Semis & Final)', value: 4 },
+            { name: '8 Jogadores (Quartas, Semis & Final)', value: 8 }
         ))
-        .addStringOption(o => o.setName('mapa').setDescription('Mapa da partida').setRequired(true))
-        .addIntegerOption(o => o.setName('expira').setDescription('Tempo de inscrição (Minutos)').setRequired(true)),
+        .addStringOption(o => o.setName('mapa').setDescription('Mapa da Competição').setRequired(true))
+        .addIntegerOption(o => o.setName('expira').setDescription('Minutos para encerramento das inscrições').setRequired(true)),
 
     async execute(interaction) {
-        const ID_STAFF = '1453126709447754010';
+        // --- CONSTANTES DE IDENTIDADE E PERMISSÃO ---
+        const ID_CARGO_STAFF = '1453126709447754010';
+        const ID_CARGO_ADV = '1467222875399393421';
         const ID_CANAL_TOPICOS = '1474560305492394106';
-        const RANK_PATH = '/app/data/ranking.json';
-        const CONFIG_PATH = '/app/data/ranking_config.json';
+        const ID_CANAL_AUDITORIA = '1473873994674606231';
         
-        // 🔒 TRAVA: APENAS O CRIADOR CONTROLA OS BOTÕES DE VITÓRIA
-        const criadorId = interaction.user.id;
+        const PATH_RANKING = '/app/data/ranking.json';
+        const PATH_CONFIG = '/app/data/ranking_config.json';
+        const ORGANIZADOR_ID = interaction.user.id;
 
-        if (!interaction.member.roles.cache.has(ID_STAFF) && interaction.user.id !== interaction.guild.ownerId) {
-            return interaction.reply({ content: '❌ Você não tem o cargo de Organizador!', ephemeral: true });
+        // --- VALIDAÇÕES DE SEGURANÇA ---
+        const isStaff = interaction.member.roles.cache.has(ID_CARGO_STAFF);
+        const hasAdv = interaction.member.roles.cache.has(ID_CARGO_ADV);
+        const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+
+        if (hasAdv) {
+            return interaction.reply({ content: '⛔ **SISTEMA ALPHA:** Sua conta possui restrições competitivas (Advertência).', ephemeral: true });
         }
 
-        const versao = interaction.options.getString('versao').toUpperCase();
-        const vagas = interaction.options.getInteger('vagas');
-        const mapa = interaction.options.getString('mapa').toUpperCase();
-        const expira = interaction.options.getInteger('expira');
-        let inscritos = [];
+        if (!isStaff && !isAdmin) {
+            return interaction.reply({ content: '❌ **ACESSO NEGADO:** Comando restrito à Staff da Copa SZ.', ephemeral: true });
+        }
 
-        // --- EMBED DE INSCRIÇÃO ---
-        const embedIns = new EmbedBuilder()
-            .setTitle(`🏆 SIMULADOR 1V1: ${mapa}`)
+        // --- VARIÁVEIS DE ESTADO DA PARTIDA ---
+        const versaoInput = interaction.options.getString('versao').toUpperCase();
+        const vagasTotais = interaction.options.getInteger('vagas');
+        const mapaOficial = interaction.options.getString('mapa').toUpperCase();
+        const tempoLimite = interaction.options.getInteger('expira');
+        
+        let jogadoresInscritos = [];
+        let bracketAtiva = true;
+
+        // --- MOTOR DE LOGS DE AUDITORIA ---
+        const enviarAuditoria = async (msgEmbed) => {
+            const canalLog = interaction.guild.channels.cache.get(ID_CANAL_AUDITORIA);
+            if (canalLog) await canalLog.send({ embeds: [msgEmbed] });
+        };
+
+        // --- SISTEMA DE PERSISTÊNCIA (FILE SYSTEM) ---
+        const lerBancoDados = (caminho) => {
+            try {
+                if (!fs.existsSync(caminho)) return {};
+                const raw = fs.readFileSync(caminho, 'utf8');
+                return JSON.parse(raw || '{}');
+            } catch (error) {
+                console.error(`[ERRO FS] Falha na leitura: ${caminho}`, error);
+                return {};
+            }
+        };
+
+        const gravarBancoDados = (caminho, dados) => {
+            try {
+                fs.writeFileSync(caminho, JSON.stringify(dados, null, 4));
+                return true;
+            } catch (error) {
+                console.error(`[ERRO FS] Falha na gravação: ${caminho}`, error);
+                return false;
+            }
+        };
+
+        // --- CONSTRUÇÃO DA INTERFACE DE INSCRIÇÃO ---
+        const embedStatus = new EmbedBuilder()
+            .setTitle(`🏆 SIMULADOR ALPHA 1V1 | ${mapaOficial}`)
+            .setAuthor({ name: `Organizado por: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
             .setColor('#8b00ff')
+            .setDescription(`⚠️ **Atenção:** Simulador monitorado. Jogadores com advertência não podem participar.`)
             .addFields(
-                { name: '🎮 VERSÃO:', value: versao, inline: true },
-                { name: '👥 VAGAS:', value: `${vagas}`, inline: true },
-                { name: '⏱️ EXPIRA:', value: `${expira} min`, inline: true }
+                { name: '📍 Mapa:', value: `\`${mapaOficial}\``, inline: true },
+                { name: '🛠️ Versão:', value: `\`${versaoInput}\``, inline: true },
+                { name: '👥 Vagas:', value: `\`${vagasTotais}\``, inline: true }
             )
-            .setFooter({ text: `Organizador: ${interaction.user.username} • alpha` });
+            .setFooter({ text: `Progresso: (0/${vagasTotais}) • Alpha Competition Engine` })
+            .setTimestamp();
 
-        const rowIns = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('in').setLabel('INSCREVER-SE').setStyle(ButtonStyle.Primary)
+        const btnAcao = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('insc_alpha_btn')
+                .setLabel('CONFIRMAR INSCRIÇÃO')
+                .setEmoji('🎮')
+                .setStyle(ButtonStyle.Primary)
         );
 
-        const res = await interaction.reply({ embeds: [embedIns], components: [rowIns] });
+        const msgOriginal = await interaction.reply({ embeds: [embedStatus], components: [btnAcao], fetchReply: true });
 
-        const colIns = res.createMessageComponentCollector({ time: expira * 60000 });
+        const coletorMain = msgOriginal.createMessageComponentCollector({ 
+            componentType: ComponentType.Button, 
+            time: tempoLimite * 60000 
+        });
 
-        colIns.on('collect', async i => {
-            if (inscritos.includes(i.user.id)) return i.reply({ content: 'Você já está inscrito!', ephemeral: true });
-            inscritos.push(i.user.id);
+        // --- LÓGICA DE COLETA DE JOGADORES ---
+        coletorMain.on('collect', async i => {
+            if (i.member.roles.cache.has(ID_CARGO_ADV)) {
+                return i.reply({ content: '❌ Seu perfil possui restrições competitivas.', ephemeral: true });
+            }
+
+            if (jogadoresInscritos.includes(i.user.id)) {
+                return i.reply({ content: '⚠️ Você já está registrado neste simulador.', ephemeral: true });
+            }
+
+            if (jogadoresInscritos.length >= vagasTotais) {
+                return i.reply({ content: '❌ Todas as vagas foram preenchidas.', ephemeral: true });
+            }
+
+            jogadoresInscritos.push(i.user.id);
             
-            if (inscritos.length === vagas) {
-                colIns.stop('lotado');
-            } else {
-                const newFooter = `Organizador: ${interaction.user.username} • (${inscritos.length}/${vagas}) alpha`;
-                await i.update({ embeds: [new EmbedBuilder(embedIns.data).setFooter({ text: newFooter })] });
+            const embedUpdate = EmbedBuilder.from(embedStatus)
+                .setFooter({ text: `Progresso: (${jogadoresInscritos.length}/${vagasTotais}) • Alpha Competition Engine` });
+
+            await i.update({ embeds: [embedUpdate] });
+
+            if (jogadoresInscritos.length === vagasTotais) {
+                coletorMain.stop('lotado');
             }
         });
 
-        colIns.on('end', async (collected, reason) => {
-            if (reason === 'lotado') {
-                const shuffle = (a) => a.sort(() => Math.random() - 0.5);
-                const ids = shuffle([...inscritos]);
-                const nomes = ids.map(id => interaction.guild.members.cache.get(id)?.displayName.slice(0,10) || "Player");
+        coletorMain.on('end', async (collected, reason) => {
+            if (reason === 'time') {
+                const embedCancel = new EmbedBuilder()
+                    .setTitle('❌ SIMULADOR EXPIRADO')
+                    .setColor('#ff0000')
+                    .setDescription(`O tempo de ${tempoLimite} minutos esgotou. Inscrições canceladas.`);
+                return interaction.editReply({ embeds: [embedCancel], components: [] });
+            }
 
-                // 📊 ESTRUTURA COMPLETA DE FASES (QUARTAS, SEMIS, FINAL)
-                let fases = {
-                    oitavas: [], quartas: [], semis: [], final: { p1: "", p2: "", p1id: "", p2id: "", vId: "", vNome: "" }
+            if (reason === 'lotado') {
+                // --- INICIALIZAÇÃO DA BRACKET ---
+                const sortear = (array) => array.sort(() => Math.random() - 0.5);
+                const idsSorteados = sortear([...jogadoresInscritos]);
+                const nomesP = idsSorteados.map(id => interaction.guild.members.cache.get(id)?.displayName.slice(0,12) || "Player");
+
+                // Estrutura de dados das Rodadas para Histórico Permanente
+                let bracketState = {
+                    quartas: [],
+                    semis: [],
+                    final: { p1: "", p2: "", p1id: "", p2id: "", vId: null, vNome: "" }
                 };
 
-                // Inicialização Dinâmica
-                if (vagas === 2) {
-                    fases.final = { p1: nomes[0], p2: nomes[1], p1id: ids[0], p2id: ids[1], vId: null };
-                } else if (vagas === 4) {
-                    fases.semis = [
-                        { p1: nomes[0], p2: nomes[1], p1id: ids[0], p2id: ids[1], vId: null },
-                        { p1: nomes[2], p2: nomes[3], p1id: ids[2], p2id: ids[3], vId: null }
-                    ];
-                    fases.final = { p1: "Venc 1", p2: "Venc 2", vId: null };
-                } else if (vagas === 8) {
-                    for(let i=0; i<8; i+=2) {
-                        fases.quartas.push({ p1: nomes[i], p2: nomes[i+1], p1id: ids[i], p2id: ids[i+1], vId: null });
+                // Configuração das Fases
+                if (vagasTotais === 2) {
+                    bracketState.final = { p1: nomesP[0], p2: nomesP[1], p1id: idsSorteados[0], p2id: idsSorteados[1], vId: null };
+                } else if (vagasTotais === 4) {
+                    for(let i=0; i<4; i+=2) {
+                        bracketState.semis.push({ p1: nomesP[i], p2: nomesP[i+1], p1id: idsSorteados[i], p2id: idsSorteados[i+1], vId: null });
                     }
-                    fases.semis = [{ p1: "Venc A", p2: "Venc B", vId: null }, { p1: "Venc C", p2: "Venc D", vId: null }];
-                    fases.final = { p1: "Finalista 1", p2: "Finalista 2", vId: null };
+                    bracketState.final = { p1: "Finalista A", p2: "Finalista B", vId: null };
+                } else if (vagasTotais === 8) {
+                    for(let i=0; i<8; i+=2) {
+                        bracketState.quartas.push({ p1: nomesP[i], p2: nomesP[i+1], p1id: idsSorteados[i], p2id: idsSorteados[i+1], vId: null });
+                    }
+                    bracketState.semis = [{p1: "Venc 1", p2: "Venc 2", vId: null}, {p1: "Venc 3", p2: "Venc 4", vId: null}];
+                    bracketState.final = { p1: "Finalista A", p2: "Finalista B", vId: null };
                 }
 
-                // 🎨 FUNÇÃO DE DESENHO (O HISTÓRICO QUE VOCÊ PEDIU)
-                const desenhar = () => {
-                    let b = "```md\n# ⚔️ BRACKET ALPHA - 1V1\n\n";
-                    const f = (m) => {
-                        if (!m.p1id) return `${m.p1} vs ${m.p2}`;
-                        if (!m.vId) return `${m.p1} vs ${m.p2}`;
-                        return m.vId === m.p1id ? `>${m.p1}< vs ${m.p2}` : `${m.p1} vs >${m.p2}<`;
+                // --- GERADOR DE BRACKET VISUAL (ALINHAMENTO EM BLOCO) ---
+                const gerarVisualBracket = () => {
+                    let text = "```md\n# 🛡️ BRACKET ALPHA OFICIAL\n\n";
+                    
+                    const formatMatch = (m) => {
+                        if (!m.p1id) return `${m.p1.padEnd(12)} vs ${m.p2}`;
+                        if (!m.vId) return `${m.p1.padEnd(12)} vs ${m.p2}`;
+                        return m.vId === m.p1id ? `>${m.p1}<`.padEnd(14) + ` vs ${m.p2}` : `${m.p1.padEnd(12)} vs >${m.p2}<`;
                     };
 
-                    if (vagas === 8) {
-                        b += `[QUARTAS DE FINAL]\n` + fases.quartas.map((m, i) => `${i+1}. ${f(m)}`).join('\n') + "\n\n";
+                    if (vagasTotais === 8) {
+                        text += `[QUARTAS DE FINAL]\n` + bracketState.quartas.map((m, i) => `${i+1}. ${formatMatch(m)}`).join('\n') + "\n\n";
+                        text += `[SEMIFINAIS]\n` + bracketState.semis.map((m, i) => `${i === 0 ? 'A' : 'B'}. ${formatMatch(m)}`).join('\n') + "\n\n";
+                    } else if (vagasTotais === 4) {
+                        text += `[SEMIFINAIS]\n` + bracketState.semis.map((m, i) => `${i+1}. ${formatMatch(m)}`).join('\n') + "\n\n";
                     }
-                    if (vagas >= 4) {
-                        b += `[SEMIFINAIS]\n` + fases.semis.map((m, i) => `${String.fromCharCode(65+i)}. ${f(m)}`).join('\n') + "\n\n";
-                    }
-                    b += `[GRANDE FINAL]\n⭐ ${f(fases.final)}\n`;
-                    if (fases.final.vId) b += `\n🏆 CAMPEÃO: ${fases.final.vNome}`;
-                    return b + "```";
+                    
+                    text += `[GRANDE FINAL]\n⭐ ${formatMatch(bracketState.final)}\n`;
+                    if (bracketState.final.vId) text += `\n🏆 CAMPEÃO: ${bracketState.final.vNome.toUpperCase()}`;
+                    return text + "```";
                 };
 
-                await interaction.editReply({ 
-                    content: `🚨 **Inscrições fechadas!** Iniciando confrontos...`,
-                    embeds: [new EmbedBuilder().setTitle('⚔️ CHAVEAMENTO DEFINIDO').setDescription(desenhar()).setColor('#00ff00')], 
-                    components: [] 
-                });
+                const embedBracket = new EmbedBuilder()
+                    .setTitle('⚔️ CHAVEAMENTO DEFINIDO - ALPHA ENGINE')
+                    .setColor('#00ff00')
+                    .setDescription(gerarVisualBracket())
+                    .setTimestamp();
+
+                await interaction.editReply({ content: '✅ Inscrições encerradas. Iniciando rodadas...', embeds: [embedBracket], components: [] });
 
                 const canalThreads = interaction.guild.channels.cache.get(ID_CANAL_TOPICOS);
 
-                // 🕹️ GERENCIADOR DE CONFRONTOS
-                const iniciarDuelo = async (match, faseNome, index) => {
-                    if (!match.p1id || !match.p2id) return;
+                // --- MOTOR DE GERENCIAMENTO DE CONFRONTOS ---
+                const criarDueloAlpha = async (confronto, faseNome, index) => {
+                    if (!confronto.p1id || !confronto.p2id) return;
 
-                    const thread = await canalThreads.threads.create({ 
-                        name: `Simu1v1-${match.p1}-vs-${match.p2}`, 
-                        type: ChannelType.PrivateThread 
+                    const thread = await canalThreads.threads.create({
+                        name: `AlphaCH-${confronto.p1}-vs-${confronto.p2}`,
+                        autoArchiveDuration: 60,
+                        type: ChannelType.PrivateThread
                     });
 
-                    await thread.members.add(match.p1id);
-                    await thread.members.add(match.p2id);
+                    await thread.members.add(confronto.p1id);
+                    await thread.members.add(confronto.p2id);
 
-                    const rowV = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`v_${match.p1id}`).setLabel(`Vencer: ${match.p1}`).setStyle(ButtonStyle.Success),
-                        new ButtonBuilder().setCustomId(`v_${match.p2id}`).setLabel(`Vencer: ${match.p2}`).setStyle(ButtonStyle.Success)
+                    const btnsDuelo = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`v_${confronto.p1id}`).setLabel(`Vencer: ${confronto.p1}`).setStyle(ButtonStyle.Success),
+                        new ButtonBuilder().setCustomId(`v_${confronto.p2id}`).setLabel(`Vencer: ${confronto.p2}`).setStyle(ButtonStyle.Success)
                     );
 
-                    const msgT = await thread.send({ 
-                        content: `🏆 <@${criadorId}>, declare o vencedor:\n<@${match.p1id}> vs <@${match.p2id}>`, 
-                        components: [rowV] 
+                    const msgDuelo = await thread.send({
+                        content: `🏁 **DUELO ALPHA**\nOrganizador: <@${ORGANIZADOR_ID}>\nPartida: <@${confronto.p1id}> vs <@${confronto.p2id}>`,
+                        components: [btnsDuelo]
                     });
 
-                    const sCol = msgT.createMessageComponentCollector();
+                    const coletorVitoria = msgDuelo.createMessageComponentCollector();
 
-                    sCol.on('collect', async b => {
-                        // 🔐 TRAVA DE CRIADOR
-                        if (b.user.id !== criadorId) {
-                            return b.reply({ content: `❌ Apenas o organizador <@${criadorId}> pode clicar!`, ephemeral: true });
+                    coletorVitoria.on('collect', async b => {
+                        // 🔐 TRAVA DE IDENTIDADE: APENAS O ORGANIZADOR PODE CLICAR
+                        if (b.user.id !== ORGANIZADOR_ID) {
+                            return b.reply({ content: `❌ Bloqueio Alpha: Apenas o organizador <@${ORGANIZADOR_ID}> possui controle sobre esta partida.`, ephemeral: true });
                         }
 
                         const vId = b.customId.replace('v_', '');
                         const vNome = b.guild.members.cache.get(vId).displayName;
 
-                        // ATUALIZAÇÃO DA LÓGICA DE FASES
+                        // PROMOÇÃO DE RODADAS
                         if (faseNome === 'quartas') {
-                            fases.quartas[index].vId = vId;
-                            // Avança para Semi
+                            bracketState.quartas[index].vId = vId;
                             const semiIdx = Math.floor(index / 2);
                             const slot = (index % 2 === 0) ? 'p1' : 'p2';
-                            fases.semis[semiIdx][slot] = vNome;
-                            fases.semis[semiIdx][slot + 'id'] = vId;
-                        } 
-                        else if (faseNome === 'semis') {
-                            fases.semis[index].vId = vId;
-                            // Avança para Final
+                            bracketState.semis[semiIdx][slot] = vNome;
+                            bracketState.semis[semiIdx][slot + 'id'] = vId;
+                            // Se a semi estiver pronta, pode disparar (Opcional no fluxo Alpha)
+                        } else if (faseNome === 'semis') {
+                            bracketState.semis[index].vId = vId;
                             const slot = (index === 0) ? 'p1' : 'p2';
-                            fases.final[slot] = vNome;
-                            fases.final[slot + 'id'] = vId;
-                        } 
-                        else if (faseNome === 'final') {
-                            fases.final.vId = vId;
-                            fases.final.vNome = vNome;
+                            bracketState.final[slot] = vNome;
+                            bracketState.final[slot + 'id'] = vId;
+                        } else if (faseNome === 'final') {
+                            bracketState.final.vId = vId;
+                            bracketState.final.vNome = vNome;
 
-                            // 💾 SALVAMENTO NO RANKING VOLUME
-                            let rData = JSON.parse(fs.readFileSync(RANK_PATH, 'utf8'));
-                            const pId = vId === match.p1id ? match.p2id : match.p1id;
+                            // --- PERSISTÊNCIA DE RANKING E VICE ---
+                            let dataR = lerBancoDados(PATH_RANKING);
+                            const pId = (vId === confronto.p1id) ? confronto.p2id : confronto.p1id;
 
-                            if (!rData[vId]) rData[vId] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
-                            if (!rData[pId]) rData[pId] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
+                            if (!dataR[vId]) dataR[vId] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
+                            if (!dataR[pId]) dataR[pId] = { simuV: 0, simuP: 0, apV: 0, apP: 0, x1V: 0, x1P: 0 };
 
-                            rData[vId].simuV += 1;
-                            rData[pId].simuP += 1; // VICE
-                            fs.writeFileSync(RANK_PATH, JSON.stringify(rData, null, 2));
+                            dataR[vId].simuV += 1;
+                            dataR[pId].simuP += 1; // Registro de Vice
+                            gravarBancoDados(PATH_RANKING, dataR);
 
-                            // 📢 ATUALIZAR MENSAGEM FIXA (RANKING GERAL)
+                            // --- ATUALIZAÇÃO DA GRADE (PLACAR FIXO) ---
                             try {
-                                const conf = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-                                const ch = await interaction.guild.channels.fetch(conf.channelId);
-                                const mF = await ch.messages.fetch(conf.messageId);
-                                const top10 = Object.entries(rData).sort((a,b) => b[1].simuV - a[1].simuV).slice(0,10);
-                                const emb = new EmbedBuilder().setTitle('🏆 RANKING GERAL - ALPHA').setColor('#f1c40f')
-                                    .setDescription(top10.map((u, i) => `${i+1}º | <@${u[0]}> — **${u[1].simuV} Vitórias**`).join('\n'));
-                                await mF.edit({ embeds: [emb] });
-                            } catch (e) { console.log("Config do ranking não encontrada."); }
+                                const confFixo = lerBancoDados(PATH_CONFIG);
+                                if (confFixo.channelId) {
+                                    const canalRank = await interaction.guild.channels.fetch(confFixo.channelId);
+                                    const msgRank = await canalRank.messages.fetch(confFixo.messageId);
+
+                                    const top10 = Object.entries(dataR)
+                                        .map(([id, s]) => ({
+                                            n: interaction.guild.members.cache.get(id)?.displayName.slice(0, 12) || "Player",
+                                            v: s.simuV || 0,
+                                            d: s.simuP || 0
+                                        }))
+                                        .sort((a, b) => b.v - a.v)
+                                        .slice(0, 10);
+
+                                    let gradeF = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
+                                    top10.forEach((u, i) => {
+                                        gradeF += `${(i+1).toString().padEnd(3)}  ${u.n.padEnd(14)}  ${u.v.toString().padEnd(5)}  ${u.d}\n`;
+                                    });
+                                    gradeF += "```";
+
+                                    await msgRank.edit({ embeds: [new EmbedBuilder().setTitle('🏆 RANKING GERAL - ALPHA').setColor('#f1c40f').setDescription(gradeF).setTimestamp()] });
+                                }
+                            } catch (e) { console.log("Grade fixa não encontrada."); }
                         }
 
-                        // Atualiza a Embed principal a cada vitória
-                        await interaction.editReply({ 
-                            embeds: [new EmbedBuilder().setTitle('⚔️ BRACKET ATUALIZADA').setDescription(desenhar()).setColor('#ffff00')] 
-                        });
+                        // Atualização da Bracket Principal
+                        await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('⚔️ BRACKET ATUALIZADA').setDescription(gerarVisualBracket()).setColor('#ffff00')] });
 
-                        await b.update({ content: `✅ Resultado processado!`, components: [] });
-                        
-                        // Se avançou, cria o próximo tópico se a fase lotar (Lógica de continuação)
-                        if (faseNome !== 'final') {
-                             await thread.send(`🏆 Partida encerrada! Aguarde a Staff abrir a próxima fase.`);
-                        }
+                        // Log de Auditoria
+                        const embedLog = new EmbedBuilder()
+                            .setTitle('🛡️ AUDITORIA ALPHA')
+                            .setColor('#3498db')
+                            .setDescription(`O organizador <@${ORGANIZADOR_ID}> declarou vitória em uma partida.`)
+                            .addFields(
+                                { name: 'Vencedor:', value: `<@${vId}>`, inline: true },
+                                { name: 'Fase:', value: faseNome, inline: true }
+                            );
+                        await enviarAuditoria(embedLog);
 
+                        await b.update({ content: `✅ **Vitória registrada.** O tópico será encerrado.`, components: [] });
                         setTimeout(() => thread.delete().catch(() => {}), 10000);
                     });
                 };
 
-                // DISPARA A PRIMEIRA RODADA
-                if (vagas === 2) iniciarDuelo(fases.final, 'final', 0);
-                else if (vagas === 4) fases.semis.forEach((m, i) => iniciarDuelo(m, 'semis', i));
-                else if (vagas === 8) fases.quartas.forEach((m, i) => iniciarDuelo(m, 'quartas', i));
-
-            } else if (reason === 'time') {
-                await interaction.editReply({ content: '❌ Inscrições encerradas por tempo.', embeds: [], components: [] });
+                // DISPARO DA RODADA INICIAL
+                if (vagasTotais === 2) {
+                    await criarDueloAlpha(bracketState.final, 'final', 0);
+                } else if (vagasTotais === 4) {
+                    for(let i=0; i<bracketState.semis.length; i++) {
+                        await criarDueloAlpha(bracketState.semis[i], 'semis', i);
+                    }
+                } else if (vagasTotais === 8) {
+                    for(let i=0; i<bracketState.quartas.length; i++) {
+                        await criarDueloAlpha(bracketState.quartas[i], 'quartas', i);
+                    }
+                }
             }
         });
     }
