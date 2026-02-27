@@ -13,7 +13,7 @@ module.exports = {
     async execute(interaction) {
         const CANAL_X1 = '1473873994674606231';
         const CANAL_TOPICOS = '1474581144748949648';
-        const ID_CARGO_STAFF = '1453126709447754010';
+        const ID_CARGO_STAFF = '1452822605773148312';
         const DB_PATH = '/app/data/partidas.json';
 
         if (interaction.channel.id !== CANAL_X1) {
