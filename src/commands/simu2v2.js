@@ -29,23 +29,24 @@ module.exports = {
         let slots = Array(vagas).fill(null);
 
         const gerarEmbed = (encerrado = false) => {
-            const lista = slots.map((user, i) => {
-                const tNum = Math.floor(i / 2) + 1;
-                const sNum = (i % 2) + 1;
-                return `**TIME ${tNum}** (Vaga ${sNum}): ${user ? `<@${user}>` : '----'}`;
-            }).join('\n');
+            let listaTimes = "";
+            for (let i = 0; i < vagas; i += 2) {
+                const p1 = slots[i] ? `<@${slots[i]}>` : '----';
+                const p2 = slots[i+1] ? `<@${slots[i+1]}>` : '----';
+                listaTimes += `**TIME ${(i/2)+1}:** ${p1}, ${p2}\n`;
+            }
+
             const desc = encerrado ? '✅ **INSCRIÇÕES ENCERRADAS - SIMULADOR INICIADO**' : `Expira em <t:${Math.floor((Date.now() + expiraMin * 60000) / 1000)}:R>`;
             return new EmbedBuilder()
                 .setTitle('🏆 SIMULADOR 2V2 - SELEÇÃO DE TIMES')
                 .setColor(encerrado ? '#00ff00' : '#2ecc71')
-                .setDescription(`${desc}\n\n**VERSÃO:** ${versao}\n**MAPA:** ${mapa}\n\n**PARTICIPANTES:**\n${lista}`)
+                .setDescription(`${desc}\n\n**VERSÃO:** ${versao}\n**MAPA:** ${mapa}\n\n**PARTICIPANTES:**\n${listaTimes}`)
                 .setFooter({ text: `Jogadores: ${slots.filter(s => s !== null).length}/${vagas}` });
         };
 
-        const menu = new StringSelectMenuBuilder().setCustomId('sel_2v2').setPlaceholder('Escolha seu Time e Vaga')
-            .addOptions(Array.from({ length: vagas }, (_, i) => {
-                const tNum = Math.floor(i/2)+1; const sNum = (i%2)+1;
-                return new StringSelectMenuOptionBuilder().setLabel(`Time ${tNum} - Vaga ${sNum}`).setValue(`${i}`);
+        const menu = new StringSelectMenuBuilder().setCustomId('sel_2v2').setPlaceholder('Escolha seu Time')
+            .addOptions(Array.from({ length: vagas / 2 }, (_, i) => {
+                return new StringSelectMenuOptionBuilder().setLabel(`Time ${i + 1}`).setValue(`${i}`);
             }));
 
         const res = await interaction.reply({ embeds: [gerarEmbed()], components: [new ActionRowBuilder().addComponents(menu)] });
@@ -53,9 +54,18 @@ module.exports = {
 
         col.on('collect', async i => {
             if (slots.includes(i.user.id)) return i.reply({ content: 'Já em um time!', ephemeral: true });
-            const vIdx = parseInt(i.values);
-            if (slots[vIdx] !== null) return i.reply({ content: 'Vaga ocupada!', ephemeral: true });
-            slots[vIdx] = i.user.id;
+            
+            const timeIdx = parseInt(i.values);
+            const vaga1 = timeIdx * 2;
+            const vaga2 = (timeIdx * 2) + 1;
+
+            let vagaFinal = -1;
+            if (slots[vaga1] === null) vagaFinal = vaga1;
+            else if (slots[vaga2] === null) vagaFinal = vaga2;
+
+            if (vagaFinal === -1) return i.reply({ content: '❌ Este time já está lotado!', ephemeral: true });
+
+            slots[vagaFinal] = i.user.id;
             if (slots.every(s => s !== null)) col.stop('lotado');
             else await i.update({ embeds: [gerarEmbed()] });
         });
@@ -65,12 +75,8 @@ module.exports = {
             await interaction.editReply({ embeds: [gerarEmbed(true)], components: [] });
 
             const canal = interaction.guild.channels.cache.get(ID_CONFRONTOS);
-            
-            // Monta as duplas fixas baseadas em quem sentou junto no menu
             let duplasFixas = [];
-            for (let i = 0; i < slots.length; i += 2) {
-                duplasFixas.push([slots[i], slots[i+1]]);
-            }
+            for (let i = 0; i < slots.length; i += 2) { duplasFixas.push([slots[i], slots[i+1]]); }
 
             const proximaFase = async (listaDeDuplas) => {
                 let vencedoresFase = [];
@@ -78,14 +84,9 @@ module.exports = {
                 const ehFinal = listaDeDuplas.length === 2;
 
                 for (let i = 0; i < listaDeDuplas.length; i += 2) {
-                    const timeA = listaDeDuplas[i];
-                    const timeB = listaDeDuplas[i+1];
-                    const th = await canal.threads.create({ 
-                        name: `${ehFinal ? '🏆-FINAL-2V2' : '⚔️-Duelo-2V2'}`, 
-                        type: ChannelType.PrivateThread 
-                    });
-                    
-                    [...timeA, ...timeB].forEach(id => th.members.add(id).catch(() => {}));
+                    const tA = listaDeDuplas[i]; const tB = listaDeDuplas[i+1];
+                    const th = await canal.threads.create({ name: `${ehFinal ? '🏆-FINAL-2V2' : '⚔️-Duelo-2V2'}`, type: ChannelType.PrivateThread });
+                    [...tA, ...tB].forEach(id => th.members.add(id).catch(() => {}));
 
                     const bt = new ActionRowBuilder().addComponents(
                         new ButtonBuilder().setCustomId(`v2a_${ehFinal}`).setLabel('Vencer Time A').setStyle(ButtonStyle.Success),
@@ -93,24 +94,21 @@ module.exports = {
                     );
 
                     await th.send({ 
-                        content: `⚔️ **${ehFinal ? 'GRANDE FINAL 2V2' : 'CONFRONTO 2V2'}**\n**TIME A:** <@${timeA[0]}> & <@${timeA[1]}>\n**VS**\n**TIME B:** <@${timeB[0]}> & <@${timeB[1]}>\n\n**Org:** <@${ORGANIZADOR_ID}>`, 
+                        content: `⚔️ **${ehFinal ? 'GRANDE FINAL 2V2' : 'CONFRONTO 2V2'}**\n**TIME A:** <@${tA[0]}> & <@${tA[1]}>\n**VS**\n**TIME B:** <@${tB[0]}> & <@${tB[1]}>\n\n**Org:** <@${ORGANIZADOR_ID}>`, 
                         components: [bt] 
                     });
 
                     const sCol = th.createMessageComponentCollector();
                     sCol.on('collect', async b => {
-                        if (b.user.id !== ORGANIZADOR_ID) return b.reply({ content: 'Apenas o organizador!', ephemeral: true });
-                        
-                        const venceuA = b.customId.startsWith('v2a');
+                        if (b.user.id !== ORGANIZADOR_ID) return b.reply({ content: 'Apenas organizador!', ephemeral: true });
                         const isFinalMsg = b.customId.split('_')[1] === 'true';
-                        const vTime = venceuA ? timeA : timeB;
-                        const pTime = venceuA ? timeB : timeA;
+                        const vTime = b.customId.startsWith('v2a') ? tA : tB;
+                        const pTime = b.customId.startsWith('v2a') ? tB : tA;
 
                         if (isFinalMsg) {
                             const data = JSON.parse(fs.readFileSync(PATH, 'utf8'));
                             [...vTime, ...pTime].forEach(id => { if(!data[id]) data[id] = { simuV:0, simuP:0, apV:0, apP:0, x1V:0, x1P:0 }; });
-                            vTime.forEach(id => data[id].simuV += 1);
-                            pTime.forEach(id => data[id].simuP += 1);
+                            vTime.forEach(id => data[id].simuV += 1); pTime.forEach(id => data[id].simuP += 1);
                             fs.writeFileSync(PATH, JSON.stringify(data, null, 2));
 
                             if (fs.existsSync(CONFIG_PATH)) {
@@ -128,12 +126,11 @@ module.exports = {
                             }
                         }
 
-                        await b.update({ content: `🏆 Vitória confirmada: <@${vTime[0]}> & <@${vTime[1]}>`, components: [] });
-                        
+                        await b.update({ content: `🏆 Vitória: <@${vTime[0]}> & <@${vTime[1]}>`, components: [] });
                         if (!isFinalMsg) {
                             vencedoresFase.push(vTime);
                             if (vencedoresFase.length === totalJogos) {
-                                await interaction.followUp({ content: `📢 **Fase concluída!** Próximos jogos do 2v2 em instantes...` });
+                                await interaction.followUp({ content: `📢 **Fase concluída!** Gerando próximos confrontos...` });
                                 proximaFase(vencedoresFase);
                             }
                         }
@@ -141,7 +138,6 @@ module.exports = {
                     });
                 }
             };
-
             await proximaFase(duplasFixas);
         });
     }
