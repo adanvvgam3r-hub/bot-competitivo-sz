@@ -4,29 +4,23 @@ const fs = require('fs');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('simu2v2')
-        .setDescription('Inicia um simulador 2v2')
+        .setDescription('Simulador 2v2 com chaves automáticas')
         .addStringOption(o => o.setName('versao').setDescription('Versão').setRequired(true))
-        .addIntegerOption(o => o.setName('vagas').setDescription('Total jogadores').setRequired(true).addChoices({name:'4 (2 Times)',value:4},{name:'8 (4 Times)',value:8}))
+        .addIntegerOption(o => o.setName('vagas').setDescription('Total de jogadores').setRequired(true)
+            .addChoices({name:'4 (2 Times)',value:4},{name:'8 (4 Times)',value:8},{name:'16 (8 Times)',value:16}))
         .addStringOption(o => o.setName('mapa').setDescription('Mapa').setRequired(true))
         .addIntegerOption(o => o.setName('expira').setDescription('Minutos').setRequired(true)),
 
     async execute(interaction) {
         const ID_STAFF = '1453126709447754010';
-        const CANAL_PERMITIDO = '1465842384586670254'; // CANAL DE INSCRIÇÕES
+        const CANAL_PERMITIDO = '1465842384586670254';
         const ID_CONFRONTOS = '1474560305492394106';
         const PATH = '/app/data/ranking.json';
         const CONFIG_PATH = '/app/data/ranking_config.json';
         const ORGANIZADOR_ID = interaction.user.id;
 
-        // 🛡️ TRAVA DE CANAL
-        if (interaction.channel.id !== CANAL_PERMITIDO) {
-            return interaction.reply({ content: `❌ Este comando só pode ser usado no canal <@#${CANAL_PERMITIDO}>!`, ephemeral: true });
-        }
-
-        // 🛡️ TRAVA DE CARGO
-        if (!interaction.member.roles.cache.has(ID_STAFF)) {
-            return interaction.reply({ content: '❌ Você não tem permissão para iniciar um simulador!', ephemeral: true });
-        }
+        if (interaction.channel.id !== CANAL_PERMITIDO) return interaction.reply({ content: `❌ Use <@#${CANAL_PERMITIDO}>`, ephemeral: true });
+        if (!interaction.member.roles.cache.has(ID_STAFF)) return interaction.reply({ content: '❌ Sem permissão!', ephemeral: true });
 
         const vagas = interaction.options.getInteger('vagas');
         const versao = interaction.options.getString('versao').toUpperCase();
@@ -36,13 +30,13 @@ module.exports = {
 
         const gerarEmbed = (encerrado = false) => {
             const lista = slots.map((user, i) => {
-                const timeNum = Math.floor(i / 2) + 1;
-                const slotNum = (i % 2) + 1;
-                return `**TIME ${timeNum}** (Vaga ${slotNum}): ${user ? `<@${user}>` : '----'}`;
+                const tNum = Math.floor(i / 2) + 1;
+                const sNum = (i % 2) + 1;
+                return `**TIME ${tNum}** (Vaga ${sNum}): ${user ? `<@${user}>` : '----'}`;
             }).join('\n');
             const desc = encerrado ? '✅ **INSCRIÇÕES ENCERRADAS - SIMULADOR INICIADO**' : `Expira em <t:${Math.floor((Date.now() + expiraMin * 60000) / 1000)}:R>`;
             return new EmbedBuilder()
-                .setTitle('🏆 SIMULADOR 2V2')
+                .setTitle('🏆 SIMULADOR 2V2 - SELEÇÃO DE TIMES')
                 .setColor(encerrado ? '#00ff00' : '#2ecc71')
                 .setDescription(`${desc}\n\n**VERSÃO:** ${versao}\n**MAPA:** ${mapa}\n\n**PARTICIPANTES:**\n${lista}`)
                 .setFooter({ text: `Jogadores: ${slots.filter(s => s !== null).length}/${vagas}` });
@@ -69,50 +63,86 @@ module.exports = {
         col.on('end', async (collected, reason) => {
             if (reason !== 'lotado') return interaction.editReply({ content: '❌ Expirado.', embeds: [], components: [] });
             await interaction.editReply({ embeds: [gerarEmbed(true)], components: [] });
+
             const canal = interaction.guild.channels.cache.get(ID_CONFRONTOS);
-
-            for (let i = 0; i < slots.length; i += 4) {
-                const idx = i/4; const tA = [slots[i], slots[i+1]]; const tB = [slots[i+2], slots[i+3]];
-                const th = await canal.threads.create({ name: `2v2-Duelo-${idx}`, type: ChannelType.PrivateThread });
-                [...tA, ...tB].forEach(id => th.members.add(id).catch(() => {}));
-                const rowV = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`v2a_${idx}`).setLabel('Vencer Time A').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId(`v2b_${idx}`).setLabel('Vencer Time B').setStyle(ButtonStyle.Success)
-                );
-                const m = await th.send({ content: `⚔️ **TIME A:** <@${tA}> & <@${tA[1]}>\n**TIME B:** <@${tB}> & <@${tB[1]}>\n**Org:** <@${ORGANIZADOR_ID}>`, components: [rowV] });
-                const sCol = m.createMessageComponentCollector();
-
-                sCol.on('collect', async b => {
-                    if (b.user.id !== ORGANIZADOR_ID) return b.reply({ content: 'Apenas organizador!', ephemeral: true });
-                    const isA = b.customId.includes('v2a');
-                    const vTime = isA ? tA : tB; const pTime = isA ? tB : tA;
-                    const finalIdx = (vagas === 4) ? 0 : 1;
-
-                    if (parseInt(b.customId.slice(-1)) === finalIdx) {
-                        const data = JSON.parse(fs.readFileSync(PATH, 'utf8'));
-                        [...vTime, ...pTime].forEach(id => { if(!data[id]) data[id] = { simuV:0, simuP:0, apV:0, apP:0, x1V:0, x1P:0 }; });
-                        vTime.forEach(id => data[id].simuV += 1); pTime.forEach(id => data[id].simuP += 1);
-                        fs.writeFileSync(PATH, JSON.stringify(data, null, 2));
-
-                        if (fs.existsSync(CONFIG_PATH)) {
-                            const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-                            const rChan = await interaction.guild.channels.fetch(config.channelId);
-                            const rMsg = await rChan.messages.fetch(config.messageId);
-                            const top10 = Object.entries(data).sort((a,b) => (b[1].simuV || 0) - (a[1].simuV || 0)).slice(0, 10);
-                            let grade = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
-                            top10.forEach(([id, s], i) => {
-                                const n = (interaction.guild.members.cache.get(id)?.displayName || "Player").slice(0,12).padEnd(12,' ');
-                                grade += `${(i+1).toString().padEnd(3,' ')}  ${n}    ${(s.simuV || 0).toString().padEnd(4,' ')}   ${(s.simuP || 0).toString().padEnd(4,' ')}\n`;
-                            });
-                            grade += "```";
-                            const nEmb = EmbedBuilder.from(rMsg.embeds[0]).setDescription(grade);
-                            await rMsg.edit({ embeds: [nEmb] }).catch(() => {});
-                        }
-                    }
-                    await b.update({ content: `🏆 Vitória: <@${vTime[0]}> & <@${vTime[1]}>`, components: [] });
-                    setTimeout(() => th.delete().catch(() => {}), 10000);
-                });
+            
+            // Monta as duplas fixas baseadas em quem sentou junto no menu
+            let duplasFixas = [];
+            for (let i = 0; i < slots.length; i += 2) {
+                duplasFixas.push([slots[i], slots[i+1]]);
             }
+
+            const proximaFase = async (listaDeDuplas) => {
+                let vencedoresFase = [];
+                const totalJogos = listaDeDuplas.length / 2;
+                const ehFinal = listaDeDuplas.length === 2;
+
+                for (let i = 0; i < listaDeDuplas.length; i += 2) {
+                    const timeA = listaDeDuplas[i];
+                    const timeB = listaDeDuplas[i+1];
+                    const th = await canal.threads.create({ 
+                        name: `${ehFinal ? '🏆-FINAL-2V2' : '⚔️-Duelo-2V2'}`, 
+                        type: ChannelType.PrivateThread 
+                    });
+                    
+                    [...timeA, ...timeB].forEach(id => th.members.add(id).catch(() => {}));
+
+                    const bt = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`v2a_${ehFinal}`).setLabel('Vencer Time A').setStyle(ButtonStyle.Success),
+                        new ButtonBuilder().setCustomId(`v2b_${ehFinal}`).setLabel('Vencer Time B').setStyle(ButtonStyle.Success)
+                    );
+
+                    await th.send({ 
+                        content: `⚔️ **${ehFinal ? 'GRANDE FINAL 2V2' : 'CONFRONTO 2V2'}**\n**TIME A:** <@${timeA[0]}> & <@${timeA[1]}>\n**VS**\n**TIME B:** <@${timeB[0]}> & <@${timeB[1]}>\n\n**Org:** <@${ORGANIZADOR_ID}>`, 
+                        components: [bt] 
+                    });
+
+                    const sCol = th.createMessageComponentCollector();
+                    sCol.on('collect', async b => {
+                        if (b.user.id !== ORGANIZADOR_ID) return b.reply({ content: 'Apenas o organizador!', ephemeral: true });
+                        
+                        const venceuA = b.customId.startsWith('v2a');
+                        const isFinalMsg = b.customId.split('_')[1] === 'true';
+                        const vTime = venceuA ? timeA : timeB;
+                        const pTime = venceuA ? timeB : timeA;
+
+                        if (isFinalMsg) {
+                            const data = JSON.parse(fs.readFileSync(PATH, 'utf8'));
+                            [...vTime, ...pTime].forEach(id => { if(!data[id]) data[id] = { simuV:0, simuP:0, apV:0, apP:0, x1V:0, x1P:0 }; });
+                            vTime.forEach(id => data[id].simuV += 1);
+                            pTime.forEach(id => data[id].simuP += 1);
+                            fs.writeFileSync(PATH, JSON.stringify(data, null, 2));
+
+                            if (fs.existsSync(CONFIG_PATH)) {
+                                const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+                                const rC = await interaction.guild.channels.fetch(cfg.channelId);
+                                const rM = await rC.messages.fetch(cfg.messageId);
+                                const top = Object.entries(data).sort((a,b) => b[1].simuV - a[1].simuV).slice(0, 10);
+                                let grade = "```md\nPOS  NOME            VITS   VICE\n---  ------------    ----   ----\n";
+                                top.forEach(([id, s], idx) => {
+                                    const n = (interaction.guild.members.cache.get(id)?.displayName || "Player").slice(0,12).padEnd(12,' ');
+                                    grade += `${(idx+1).toString().padEnd(3,' ')}  ${n}    ${(s.simuV || 0).toString().padEnd(4,' ')}   ${(s.simuP || 0).toString().padEnd(4,' ')}\n`;
+                                });
+                                grade += "```";
+                                await rM.edit({ embeds: [EmbedBuilder.from(rM.embeds[0]).setDescription(grade)] });
+                            }
+                        }
+
+                        await b.update({ content: `🏆 Vitória confirmada: <@${vTime[0]}> & <@${vTime[1]}>`, components: [] });
+                        
+                        if (!isFinalMsg) {
+                            vencedoresFase.push(vTime);
+                            if (vencedoresFase.length === totalJogos) {
+                                await interaction.followUp({ content: `📢 **Fase concluída!** Próximos jogos do 2v2 em instantes...` });
+                                proximaFase(vencedoresFase);
+                            }
+                        }
+                        setTimeout(() => th.delete().catch(() => {}), 15000);
+                    });
+                }
+            };
+
+            await proximaFase(duplasFixas);
         });
     }
 };
