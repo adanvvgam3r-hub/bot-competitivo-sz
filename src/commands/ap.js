@@ -14,7 +14,7 @@ module.exports = {
     async execute(interaction) {
         const CANAL_AP = '1473873854232264886';
         const CANAL_TOP = '1474581144748949648';
-        const STAFF = '1453126709447754010';
+        const STAFF = '1452822605773148312';
         const DB = '/app/data/partidas.json';
         const RANK = '/app/data/ranking.json';
 
