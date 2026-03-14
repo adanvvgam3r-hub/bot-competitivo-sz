@@ -155,9 +155,9 @@ module.exports = {
                     if (!b.member.roles.cache.has(ID_DONO_ROLE)) return b.reply({ content: "Sem permissão!", ephemeral: true });
                     await b.deferUpdate();
                     const win = b.customId === 'winA' ? 'TIME A' : 'TIME B';
-                    await thread.send(`🏆 **${win} VENCEU!** O tópico será arquivado.`);
+                    await thread.send(`🏆 **${win} VENCEU!** O tópico será excluido.`);
                     await msgVitoria.edit({ components: [] });
-                    setTimeout(() => thread.setArchived(true), 15000);
+                    setTimeout(() => thread.delete().catch(() => {}), 15000);
                 });
             }
         });
