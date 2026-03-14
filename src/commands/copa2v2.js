@@ -67,7 +67,6 @@ module.exports = {
 
             if (slots[v1] !== null && slots[v2] !== null) return i.reply({ content: '❌ Time lotado!', ephemeral: true });
 
-            // JOGADOR 1: CRIA TÓPICO PRIVADO PARA CONFIGURAR
             if (slots[v1] === null) {
                 await i.deferReply({ ephemeral: true });
                 try {
@@ -76,60 +75,50 @@ module.exports = {
                         type: ChannelType.PrivateThread,
                         autoArchiveDuration: 60
                     });
-
                     await thread.members.add(i.user.id);
-                    await i.editReply({ content: `Acesse o tópico <#${thread.id}> para configurar seu time!` });
+                    await i.editReply({ content: `Acesse <#${thread.id}> para configurar o time!` });
 
                     const btns = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`f_${timeIdx}`).setLabel('Livre (Sem Senha)').setStyle(ButtonStyle.Success),
-                        new ButtonBuilder().setCustomId(`k_${timeIdx}`).setLabel('Privado (Com Senha)').setStyle(ButtonStyle.Danger)
+                        new ButtonBuilder().setCustomId(`f_${timeIdx}`).setLabel('Livre').setStyle(ButtonStyle.Success),
+                        new ButtonBuilder().setCustomId(`k_${timeIdx}`).setLabel('Privado').setStyle(ButtonStyle.Danger)
                     );
 
-                    const msgThread = await thread.send({ content: `Olá <@${i.user.id}>, como o **Time ${timeIdx + 1}** será preenchido?`, components: [btns] });
+                    const msgThread = await thread.send({ content: `<@${i.user.id}>, configure o **Time ${timeIdx + 1}**:`, components: [btns] });
                     const bCol = msgThread.createMessageComponentCollector({ max: 1, time: 30000 });
 
                     bCol.on('collect', async b => {
                         await b.deferUpdate();
                         slots[v1] = b.user.id;
-
                         if (b.customId.startsWith('f_')) {
                             chavesTimes[timeIdx] = null;
-                            await thread.send('✅ Time definido como **Público**. Este tópico será excluído em 5s.');
+                            await thread.send('✅ Público! Tópico deletando...');
                         } else {
                             const random = Math.floor(1000 + Math.random() * 9000);
                             const chave = `${b.user.id.substring(0, 2)}${random}`;
                             chavesTimes[timeIdx] = chave;
-                            await thread.send(`🔐 Time **Privado**! Sua chave é: \`${chave}\`\nEnvie para seu duo. Este tópico será excluído em 10s.`);
+                            await thread.send(`🔐 Privado! Chave: \`${chave}\`. Tópico deletando...`);
                         }
-
                         await interaction.editReply({ embeds: [gerarEmbed()] });
                         setTimeout(() => thread.delete().catch(() => {}), 10000);
                         if (slots.every(s => s !== null)) col.stop('lotado');
                     });
-                } catch (e) {
-                    await i.editReply({ content: "❌ Erro ao criar tópico. Verifique minhas permissões!" });
-                }
+                } catch (e) { await i.editReply({ content: "❌ Erro nas permissões de Tópico!" }); }
                 return;
             }
 
-            // JOGADOR 2: ENTRADA VIA MODAL (SE TIVER CHAVE)
             if (chavesTimes[timeIdx]) {
                 const modal = new ModalBuilder().setCustomId(`mod_${timeIdx}`).setTitle('Senha do Time');
-                const input = new TextInputBuilder().setCustomId('key').setLabel('DIGITE A SENHA').setStyle(TextInputStyle.Short).setRequired(true);
+                const input = new TextInputBuilder().setCustomId('key').setLabel('SENHA').setStyle(TextInputStyle.Short).setRequired(true);
                 modal.addComponents(new ActionRowBuilder().addComponents(input));
                 await i.showModal(modal);
-
                 const subm = await i.awaitModalSubmit({ filter: m => m.user.id === i.user.id, time: 30000 }).catch(() => null);
                 if (!subm) return;
-
                 await subm.deferUpdate(); 
                 if (subm.fields.getTextInputValue('key') === chavesTimes[timeIdx]) {
                     slots[v2] = i.user.id;
                     await interaction.editReply({ embeds: [gerarEmbed()] });
                     if (slots.every(s => s !== null)) col.stop('lotado');
-                } else { 
-                    await subm.followUp({ content: '❌ Senha incorreta!', ephemeral: true }); 
-                }
+                } else { await subm.followUp({ content: '❌ Erro!', ephemeral: true }); }
             } else {
                 await i.deferUpdate();
                 slots[v2] = i.user.id;
@@ -139,35 +128,37 @@ module.exports = {
         });
 
         col.on('end', async (_, reason) => {
-            if (reason !== 'lotado') return interaction.editReply({ content: '❌ Inscrições encerradas ou tempo expirado.', components: [] });
-            
+            if (reason !== 'lotado') return interaction.editReply({ content: '❌ Encerrado.', components: [] });
             await interaction.editReply({ embeds: [gerarEmbed(true)], components: [] });
             const canalConfrontos = interaction.guild.channels.cache.get(ID_CONFRONTOS);
             if (!canalConfrontos) return;
 
             for (let i = 0; i < slots.length; i += 4) {
                 if (!slots[i+2]) break;
-
                 const tA = [slots[i], slots[i+1]];
                 const tB = [slots[i+2], slots[i+3]];
-
-                const thread = await canalConfrontos.threads.create({
-                    name: `⚔️ Jogo ${Math.floor(i/4) + 1} - 2v2`,
-                    type: ChannelType.PrivateThread
-                });
-
+                const thread = await canalConfrontos.threads.create({ name: `⚔️ Jogo ${Math.floor(i/4) + 1}`, type: ChannelType.PrivateThread });
                 [...tA, ...tB].forEach(id => thread.members.add(id).catch(() => {}));
 
-                const embedJogo = new EmbedBuilder()
-                    .setTitle('⚔️ CONFRONTO DEFINIDO')
-                    .setColor('#e74c3c')
-                    .addFields(
-                        { name: 'Time A', value: `<@${tA[0]}> & <@${tA[1]}>`, inline: true },
-                        { name: 'Time B', value: `<@${tB[0]}> & <@${tB[1]}>`, inline: true },
-                        { name: 'Info', value: `**Mapa:** ${mapa}\n**Versão:** ${versao}` }
-                    );
+                const embedJogo = new EmbedBuilder().setTitle('⚔️ JOGO INICIADO').setColor('#e74c3c')
+                    .addFields({ name: 'Time A', value: `<@${tA[0]}> & <@${tA[1]}>`, inline: true }, { name: 'Time B', value: `<@${tB[0]}> & <@${tB[1]}>`, inline: true });
 
-                await thread.send({ content: `🔥 <@${tA[0]}> <@${tA[1]}> VS <@${tB[0]}> <@${tB[1]}>`, embeds: [embedJogo] });
+                const btnsVitoria = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('winA').setLabel('Vitória Time A').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId('winB').setLabel('Vitória Time B').setStyle(ButtonStyle.Primary)
+                );
+
+                const msgVitoria = await thread.send({ content: `🔥 <@${tA[0]}> <@${tA[1]}> VS <@${tB[0]}> <@${tB[1]}>`, embeds: [embedJogo], components: [btnsVitoria] });
+                
+                const coletorVitoria = msgVitoria.createMessageComponentCollector();
+                coletorVitoria.on('collect', async b => {
+                    if (!b.member.roles.cache.has(ID_DONO_ROLE)) return b.reply({ content: "Sem permissão!", ephemeral: true });
+                    await b.deferUpdate();
+                    const win = b.customId === 'winA' ? 'TIME A' : 'TIME B';
+                    await thread.send(`🏆 **${win} VENCEU!** O tópico será arquivado.`);
+                    await msgVitoria.edit({ components: [] });
+                    setTimeout(() => thread.setArchived(true), 15000);
+                });
             }
         });
     },
